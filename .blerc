@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# ~/.blerc
+#
+# ble.sh configuration file.
+# ble.sh version: 0.4.0-devel3  (https://github.com/akinomyoga/ble.sh)
+#
+# This file is sourced by ble.sh after it attaches.  Use it for:
+#   - ble.sh UX settings (bleopt)
+#   - syntax highlighting faces (ble-face)
+#   - fzf integration (ble-import)
+#   - ble.sh-specific key bindings (ble/function:blerc)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── fzf integration ───────────────────────────────────────────────────────────
+# These replace fzf's native CTRL-T / CTRL-R / ALT-C bindings and eliminate
+# keymap conflicts between fzf and ble.sh.
+#
+# Requires fzf to be installed and on PATH.
+# The modules ship with ble.sh — no extra install step needed.
+if command -v fzf &>/dev/null; then
+    ble-import -d integration/fzf-completion    # TAB completion via fzf
+    ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
+fi
+
+# ── Auto-complete behaviour ───────────────────────────────────────────────────
+# Delay before showing the auto-complete menu (milliseconds).
+bleopt complete_auto_delay=150
+
+# Enable automatic asynchronous completion after each keystroke.
+# (To instead auto-select the single match silently, use complete_auto_select=1)
+bleopt complete_auto_complete=1
+
+# Maximum number of candidates shown in the auto-complete menu.
+bleopt complete_limit=500
+
+# ── History ───────────────────────────────────────────────────────────────────
+# Share history across simultaneous terminal sessions at the ble.sh level.
+# This replaces the history -a/-c/-r PROMPT_COMMAND hook from history.sh
+# (which is skipped when ble.sh is active — see history.sh for details).
+bleopt history_share=1
+
+# ── Editing ────────────────────────────────────────────────────────────────────
+# Enable syntax highlighting (brace/bracket matching is part of this).
+bleopt highlight_syntax=1
+
+# ── Colour / highlighting faces ───────────────────────────────────────────────
+# These use Catppuccin Mocha palette to match FZF_DEFAULT_OPTS in exports.sh.
+# Uncomment any or all lines — changes take effect immediately after: source ~/.blerc
+# List all valid face names in your installed version:  ble-list-faces  (run in shell)
+# Full face reference: https://github.com/akinomyoga/ble.sh/wiki/Manual-%C2%A73-Faces
+#
+# ble-face -s syntax_error             fg=red,bold
+# ble-face -s command_builtin          fg=#89dceb,bold   # sky
+# ble-face -s command_function         fg=#cba6f7        # mauve
+# ble-face -s command_file             fg=#a6e3a1        # green
+# ble-face -s command_alias            fg=#f9e2af        # yellow
+# ble-face -s command_keyword          fg=#f38ba8,bold   # red
+# ble-face -s variable_name            fg=#fab387        # peach
+# ble-face -s varname_export           fg=#fab387,bold
+# ble-face -s argument_option          fg=#94e2d5        # teal
+# ble-face -s string                   fg=#a6e3a1        # green
+# ble-face -s comment                  fg=#585b70,italic # overlay0
+
+# ── Prompt ────────────────────────────────────────────────────────────────────
+# Right-side prompt string (ble.sh only — not set by Starship automatically).
+# Starship does not populate prompt_rps1 in bash mode. To add Starship content
+# here you would need right_format in starship.toml + custom glue code.
+# Uncomment and customise for a simple right-side clock or similar:
+# bleopt prompt_rps1='$(date +%H:%M)'
+
+# ── WSL / Windows Terminal note ───────────────────────────────────────────────
+# If you see garbage characters (">0;10;1c", "2;1R", etc.) appearing in the
+# prompt right after the shell starts, it means ble.sh fell back to
+# single-byte mode due to a missing locale.  The fix is NOT a bleopt tweak —
+# it is installing the locale on the system:
+#
+#   sudo apt-get install -y locales
+#   sudo locale-gen en_US.UTF-8
+#   sudo update-locale LANG=en_US.UTF-8
+#   # then open a new terminal
+#
+# setup.sh runs this automatically if locale-gen is available.
+
+# ── Vi mode (optional) ────────────────────────────────────────────────────────
+# Uncomment to switch ble.sh to vi editing mode.
+# bleopt default_keymap=vi
+#
+# For the readline fallback (when ble.sh is NOT running), also uncomment
+# 'bind "set editing-mode vi"' in bash/bindings.sh — the two settings
+# are independent and each only takes effect in its own context.
