@@ -94,14 +94,30 @@ sudo update-locale LANG=en_US.UTF-8
 
 ## Quick start
 
-```/dev/null/shell.sh#L1-4
+```sh
 git clone https://github.com/devsnb/bash-customizations.git
-cd ~/bash-customizations
-bash setup.sh          # full install + dotfile deployment
+cd bash-customizations
+make install      # full install + dotfile deployment
 # Open a new terminal
 ```
 
-### Setup flags
+Run `make` (or `make help`) to see all available targets:
+
+| Target | Effect |
+|---|---|
+| `make install` | Install all tools + deploy dotfiles |
+| `make dotfiles` | Deploy dotfiles only (tools already installed) |
+| `make update` | Reinstall / upgrade all tools to latest versions |
+| `make dry-run` | Preview what install would do without making changes |
+| `make doctor` | Diagnose the setup and show fix instructions |
+| `make uninstall` | Remove managed symlinks and blocks from `~/.bashrc` |
+| `make restore` | Uninstall and restore the most recent backup |
+| `make purge` | Uninstall and remove all tool binaries |
+| `make list-backups` | List available backup timestamps |
+
+You can also invoke the scripts directly if you prefer:
+
+### Script flags
 
 | Flag | Effect |
 |---|---|
@@ -111,25 +127,21 @@ bash setup.sh          # full install + dotfile deployment
 | `--force` | Re-install even if a tool is already present |
 | `-h`, `--help` | Print usage, examples, and recovery hints, then exit |
 
-To upgrade installed tools to their latest versions, run `bash setup.sh --force`. See [Updating tools](#updating-tools) for per-tool commands.
+To upgrade installed tools to their latest versions, run `make update` or `bash setup.sh --force`. See [Updating tools](#updating-tools) for per-tool commands.
 
 ---
 
 ## Uninstalling
 
-```/dev/null/uninstall-examples.sh#L1-10
-# Preview what would be removed
-bash uninstall.sh --dry-run
+```sh
+make restore                                    # remove symlinks + restore latest backup
+make purge                                      # also remove tool binaries
 
-# Remove managed blocks from ~/.bashrc, remove symlinks, restore backups
-bash uninstall.sh --restore
-
-# Restore a specific backup (see timestamps with --list-backups)
-bash uninstall.sh --list-backups
-bash uninstall.sh --restore=20250604_142301
-
-# Also remove tool binaries (starship, fzf, zoxide, ble.sh)
-bash uninstall.sh --restore --purge-tools
+# Or with the script directly:
+bash uninstall.sh --dry-run                     # preview what would be removed
+bash uninstall.sh --list-backups                # show available timestamps
+bash uninstall.sh --restore=20250604_142301     # restore a specific backup
+bash uninstall.sh --restore --purge-tools       # full removal including binaries
 ```
 
 **Safety guarantees of `uninstall.sh`:**
