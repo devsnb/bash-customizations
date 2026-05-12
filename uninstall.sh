@@ -124,6 +124,7 @@ parse_args() {
 MANIFEST_REPO=""
 MANIFEST_BACKUP=""
 MANIFEST_LINKS=()
+MANIFEST_GUARD_ADDED=false
 
 read_manifest() {
     if [[ ! -f "$MANIFEST_FILE" ]]; then
@@ -138,9 +139,10 @@ read_manifest() {
         # Skip blank lines and comments.
         [[ -z "$key" || "$key" == \#* ]] && continue
         case "$key" in
-            REPO)   MANIFEST_REPO="$value"         ;;
-            BACKUP) MANIFEST_BACKUP="$value"        ;;
-            LINK)   MANIFEST_LINKS+=("$value")      ;;
+            REPO)         MANIFEST_REPO="$value"         ;;
+            BACKUP)       MANIFEST_BACKUP="$value"       ;;
+            LINK)         MANIFEST_LINKS+=("$value")     ;;
+            GUARD_ADDED)  [[ "$value" == "true" ]] && MANIFEST_GUARD_ADDED=true ;;
         esac
     done < "$MANIFEST_FILE"
 
@@ -423,6 +425,7 @@ remove_bashrc_blocks() {
     if $DRY_RUN; then
         $head_found && log_dry "Remove HEAD block from ~/.bashrc"
         $tail_found && log_dry "Remove TAIL block from ~/.bashrc"
+        $MANIFEST_GUARD_ADDED && log_dry "Remove non-interactive guard from ~/.bashrc (added by setup.sh)"
         return 0
     fi
 
@@ -439,11 +442,18 @@ remove_bashrc_blocks() {
             in_block=0
             continue
         fi
-        [[ $in_block -eq 0 ]] && echo "$line"
+        if [[ $in_block -eq 0 ]]; then
+            # Remove the guard only if setup.sh added it (tracked in manifest).
+            if $MANIFEST_GUARD_ADDED && [[ "$line" =~ ^\[\[.*\$-.*\*i\*.*return ]]; then
+                continue
+            fi
+            echo "$line"
+        fi
     done < "$bashrc" > "$tmp"
 
     mv "$tmp" "$bashrc"
     log_ok "Removed bash-customizations blocks from ~/.bashrc"
+    $MANIFEST_GUARD_ADDED && log_ok "Removed non-interactive guard from ~/.bashrc"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -525,6 +535,9 @@ main() {
         if grep -qF "$BLOCK_HEAD_BEGIN" "${HOME}/.bashrc" 2>/dev/null \
             || grep -qF "$BLOCK_TAIL_BEGIN" "${HOME}/.bashrc" 2>/dev/null; then
             echo "  Remove bash-customizations blocks from ~/.bashrc"
+        fi
+        if $MANIFEST_GUARD_ADDED; then
+            echo "  Remove non-interactive guard added by setup.sh from ~/.bashrc"
         fi
         echo
         confirm "Proceed with removal?" || { log_info "Aborted."; exit 0; }

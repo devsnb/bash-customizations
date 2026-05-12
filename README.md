@@ -195,6 +195,10 @@ A `bleopt` call in `.blerc` references an option that doesn’t exist in the ins
 
 Bash itself is trying to use a locale that isn’t installed. Run the locale fix above. The warning comes from bash’s own startup before `.bashrc` runs, so it can’t be suppressed by editing shell config.
 
+### `doctor.sh` warns: "No non-interactive guard found in ~/.bashrc"
+
+This is a best-practice warning, not a failure. Re-running `bash setup.sh --skip-tools` will add the guard automatically. The guard `[[ $- != *i* ]] && return` exits immediately for non-interactive shells (scripts, `scp`, `ssh -c`, etc.), preventing aliases, functions, and PATH changes from leaking into non-interactive contexts.
+
 ### fzf not found after install
 
 The install placed fzf in `~/.local/bin` which is added to `PATH` by `exports.sh`. Open a new terminal (or `source ~/.bash/exports.sh`) to pick it up.
@@ -344,20 +348,28 @@ ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 | `bak <file>` | Create a timestamped backup copy |
 | `port <n>` | Show what's listening on port *n* |
 | `find-in <pat> [path]` | Recursive coloured grep |
-| `fcd [dir]` | Fuzzy `cd` using fzf |
-| `fkill` | Interactively pick and kill a process |
+| `fcd [dir]` | Fuzzy `cd` using fzf; optional starting directory (default: `.`) |
+| `fkill [signal]` | Interactively pick and kill a process; optional signal number (default: `15` / SIGTERM) |
 | `myip` | Show public + local IP |
 | `serve [port]` | Python HTTP server in current dir |
-| `reload` | Re-source `~/.bashrc` in place |
+| `reload` | Re-source `~/.bashrc` in place (may cause prompt glitches when ble.sh is active — prefer opening a new terminal) |
 | `tre` | `tree` with hidden files + pager |
 | `weather [location]` | wttr.in weather report |
 
 ### `aliases.sh`
 - **Safety** — `cp/mv/rm` with `-iv`, `mkdir -pv`
 - **ls** — prefers `eza` when installed: `ls`, `ll`, `la`, `l` (standard views), `lt` (tree 2 levels), `llt` (tree 3 levels, long form); falls back to `ls --color`
-- **cat/less** — prefers `bat` when installed
+- **cat/less** — prefers `bat` when installed; falls back to standard commands
+- **Navigation** — `..` / `...` / `....` (go up 1–3 levels), `~` (go home), `-` (go to previous directory)
+- **grep** — `grep`, `fgrep`, `egrep` all with `--color=auto`
+- **Disk usage** — `df -h`, `du -h`, `dud` (subdirectory sizes), `duf` (files in current dir)
+- **Processes** — `psa` (`ps auxf`), `psg <name>` (grep process list)
+- **Network** — `ping -c 5`, `ports` (`ss -tulpn` — list listening ports)
+- **Editor** — `v` / `vi` → `$EDITOR` (defaults to `nvim`)
 - **git** — `gs`, `gl`, `gd`, `gc`, `gp`, `gpl`, `gco`, `gst`, …
 - **docker** — `dk`, `dkps`, `dkpsa`, `dki`, `dkrm`, `dkrmi`, `dkx`, `dkl`, `dkc`, `dkcu`, `dkcd` (only if `docker` is installed)
+- **System** — `h` (history), `j` (jobs), `path` (print `$PATH` entries one per line), `now` (current datetime), `week` (ISO week number), `cls` (full terminal reset including scrollback)
+- **Config shortcuts** — `bashrc` opens `~/.bashrc` in `$EDITOR`; `aliases` opens `~/.bash/aliases.sh`
 
 ### `prompt.sh`
 Runs `eval "$(starship init bash)"`. Falls back to a minimal coloured `PS1`
@@ -401,10 +413,14 @@ bash-completion v2 lazy-loads it automatically.
 
 ## Adding a new module
 
+To integrate a new module into the managed setup (tracked by setup.sh and doctor.sh):
+
 1. Create `bash/mymodule.sh`
-2. Add `source "$HOME/.bash/mymodule.sh"` in `.bashrc` at the right position
-3. Run `bash setup.sh --skip-tools` to deploy the symlink
+2. Add `_src "$HOME/.bash/mymodule.sh"` to the `_gen_head_block()` function in `setup.sh` at the appropriate load-order position
+3. Run `bash setup.sh --skip-tools` — this both deploys the symlink and regenerates the managed block with your new `_src` line
 4. Run `bash doctor.sh` to confirm the new module is wired correctly
+
+For a personal addition that doesn't require touching `setup.sh`, skip step 2 and instead add a `source "$HOME/.bash/mymodule.sh"` line directly to `~/.bashrc` **outside** the managed blocks — between `# === END bash-customizations ===` and `# === BEGIN bash-customizations-attach ===`. Then run `bash setup.sh --skip-tools` to deploy the symlink.
 
 ---
 

@@ -59,9 +59,10 @@ BLOCK_HEAD_END="# === END bash-customizations ==="
 BLOCK_TAIL_BEGIN="# === BEGIN bash-customizations-attach ==="
 BLOCK_TAIL_END="# === END bash-customizations-attach ==="
 
-# Runtime tracking (populated by deploy_file)
+# Runtime tracking (populated by deploy_file / _ensure_noninteractive_guard)
 DEPLOYED_LINKS=()
 BACKUP_CREATED=false
+GUARD_ADDED=false
 
 # Flags (set by CLI args below)
 DRY_RUN=false
@@ -579,6 +580,37 @@ _inject_blocks() {
     rm -f "$tmp"
 }
 
+# _ensure_noninteractive_guard FILE
+# Inserts [[ $- != *i* ]] && return immediately before the HEAD block if the
+# guard is not already present anywhere in FILE.
+_ensure_noninteractive_guard() {
+    local file="$1" guard='[[ $- != *i* ]] && return'
+
+    if grep -qE '\[\[ \$- != \*i\*' "$file" 2>/dev/null; then
+        # Guard already present — was it added by a previous setup.sh run?
+        # Preserve the flag across re-runs by reading the old manifest.
+        if grep -qE '^GUARD_ADDED=true' "$MANIFEST_FILE" 2>/dev/null; then
+            GUARD_ADDED=true
+        fi
+        return 0
+    fi
+
+    log_info "Non-interactive guard missing — adding it to ${file}…"
+    local tmp
+    tmp="$(mktemp)"
+    local inserted=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ $inserted -eq 0 && "$line" == "$BLOCK_HEAD_BEGIN" ]]; then
+            printf '%s\n\n' "$guard"
+            inserted=1
+        fi
+        echo "$line"
+    done < "$file" > "$tmp"
+    mv "$tmp" "$file"
+    GUARD_ADDED=true
+    log_ok "Non-interactive guard added"
+}
+
 # inject_bashrc — inject or update the managed blocks in ~/.bashrc.
 inject_bashrc() {
     log_section "Configuring ~/.bashrc"
@@ -602,6 +634,9 @@ inject_bashrc() {
             log_dry "Update existing bash-customizations blocks in ${bashrc}"
         else
             log_dry "Inject bash-customizations blocks into ${bashrc}"
+        fi
+        if ! grep -qE '\[\[ \$- != \*i\*' "$bashrc" 2>/dev/null; then
+            log_dry "Add non-interactive guard to ${bashrc}"
         fi
         return 0
     fi
@@ -633,6 +668,8 @@ inject_bashrc() {
         _inject_blocks "$bashrc" "$tmp_head" "$tmp_tail"
         log_ok "Blocks injected into ${bashrc}"
     fi
+
+    _ensure_noninteractive_guard "$bashrc"
 
     rm -f "$tmp_head" "$tmp_tail"
 }
@@ -690,6 +727,7 @@ write_manifest() {
         else
             echo "BACKUP="
         fi
+        $GUARD_ADDED && echo "GUARD_ADDED=true"
         # ${arr[@]+"${arr[@]}"} is the correct set -u safe idiom for arrays:
         # expands to nothing when the array is empty, not to a single empty string.
         for link in "${DEPLOYED_LINKS[@]+"${DEPLOYED_LINKS[@]}"}" ; do
