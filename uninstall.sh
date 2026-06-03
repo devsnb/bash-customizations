@@ -10,7 +10,7 @@
 #      it (will never remove a file it didn't create).
 #   3. Removes those symlinks.
 #   4. Optionally restores the most recent (or a chosen) backup.
-#   5. Optionally removes tool binaries (starship, fzf, zoxide, ble.sh).
+#   5. Optionally removes tool binaries (starship, fzf, zoxide, tree-sitter, ble.sh).
 #
 # Usage:
 #   bash uninstall.sh                   # remove symlinks only (leaves backups)
@@ -160,6 +160,7 @@ _use_default_targets() {
     MANIFEST_LINKS=(
         "${HOME}/.blerc"
         "${XDG_CONFIG_HOME}/starship.toml"
+        "${XDG_CONFIG_HOME}/nvim"
         "${HOME}/.bash/aliases.sh"
         "${HOME}/.bash/bindings.sh"
         "${HOME}/.bash/completion.sh"
@@ -335,6 +336,7 @@ purge_tools() {
     echo "  ~/.local/bin/starship"
     echo "  ~/.local/bin/fzf     (and ~/.fzf/ if it exists)"
     echo "  ~/.local/bin/zoxide"
+    echo "  ~/.local/bin/tree-sitter"
     echo "  ~/.local/share/blesh/"
     echo
     echo -e "${YELLOW}bash-completion is a system package and will NOT be touched.${RESET}"
@@ -356,6 +358,9 @@ purge_tools() {
 
     # ── zoxide ────────────────────────────────────────────────────────────────
     _remove_bin "zoxide"
+
+    # ── tree-sitter CLI ───────────────────────────────────────────────────────
+    _remove_bin "tree-sitter"
 
     # ── ble.sh ────────────────────────────────────────────────────────────────
     local blesh_dir="${XDG_DATA_HOME}/blesh"
