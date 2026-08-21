@@ -72,8 +72,8 @@ alias ping='ping -c 5'
 alias ports='ss -tulpn'
 
 # ── Editor ────────────────────────────────────────────────────────────────────
-alias v='${EDITOR:-nvim}'
-alias vi='${EDITOR:-nvim}'
+alias v='${EDITOR:-nano}'
+alias vi='${EDITOR:-nano}'
 
 # ── Git ───────────────────────────────────────────────────────────────────────
 alias g='git'
@@ -121,5 +121,5 @@ alias week='date +%V'                   # ISO week number
 alias cls='printf "\033c"'
 
 # ── Reload / edit config ──────────────────────────────────────────────────────
-alias bashrc='${EDITOR:-nvim} ~/.bashrc'
-alias aliases='${EDITOR:-nvim} ~/.bash/aliases.sh'
+alias bashrc='${EDITOR:-nano} ~/.bashrc'
+alias aliases='${EDITOR:-nano} ~/.bash/aliases.sh'

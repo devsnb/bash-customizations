@@ -6,8 +6,8 @@
 # What it does (in order):
 #   1. Checks prerequisites (Bash ≥ 4.2, curl/wget, git)
 #   1.5. Ensures en_US.UTF-8 locale is installed (required by ble.sh)
-#   2. Installs: starship · ble.sh · bash-completion · fzf · zoxide · tree-sitter CLI
-#   3. Deploys dotfiles (.bashrc · .bash/ · .blerc · starship.toml · nvim/)
+#   2. Installs: starship · ble.sh · bash-completion · fzf · zoxide
+#   3. Deploys dotfiles (.bashrc · .bash/ · .blerc · starship.toml)
 #      with automatic backup of any existing files/directories
 #   4. Verifies that each tool is on PATH and prints a summary
 #
@@ -25,7 +25,6 @@
 #   bash-completion v2.17.0
 #   fzf             v0.62.0  (latest via git)
 #   zoxide          v0.9.9
-#   tree-sitter CLI v0.26.9
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -171,43 +170,6 @@ deploy_dir() {
         [[ -f "$src_file" ]] || continue
         deploy_file "$src_file" "${dest_dir}/$(basename "$src_file")"
     done
-}
-
-# deploy_path SRC DEST — symlink a file or directory DEST → SRC.
-# Used for complete config trees such as ~/.config/nvim.
-deploy_path() {
-    local src="$1" dest="$2"
-
-    if [[ ! -e "$src" ]]; then
-        log_warn "Source not found, skipping: $src"
-        return 0
-    fi
-
-    if [[ -L "$dest" ]]; then
-        local current_target src_real
-        current_target="$(readlink -f "$dest" 2>/dev/null \
-                       || readlink "$dest" 2>/dev/null || true)"
-        src_real="$(readlink -f "$src" 2>/dev/null \
-                 || readlink "$src" 2>/dev/null || echo "$src")"
-        if [[ "$current_target" == "$src_real" ]]; then
-            log_ok "Already linked: $dest"
-            DEPLOYED_LINKS+=("$dest")
-            return 0
-        fi
-    fi
-
-    backup_if_exists "$dest"
-    run mkdir -p "$(dirname "$dest")"
-
-    if $DRY_RUN; then
-        log_dry "rm -rf $dest"
-        log_dry "ln -s $src $dest"
-    else
-        rm -rf "$dest"
-        ln -s "$src" "$dest"
-        DEPLOYED_LINKS+=("$dest")
-        log_ok "Linked: $dest → $src"
-    fi
 }
 
 # download URL — print the raw content of a URL using curl or wget.
@@ -491,20 +453,6 @@ install_fzf() {
     if has fzf; then log_ok "fzf installed: $(ver fzf)"; fi
 }
 
-# tree_sitter_cli_ok — true if tree-sitter CLI is at least 0.26.1.
-tree_sitter_cli_ok() {
-    has tree-sitter || return 1
-
-    local version major minor patch
-    version="$(tree-sitter --version 2>/dev/null | head -1 || true)"
-    major="$(echo "$version" | grep -oE '[0-9]+' | awk 'NR==1')" || major=0
-    minor="$(echo "$version" | grep -oE '[0-9]+' | awk 'NR==2')" || minor=0
-    patch="$(echo "$version" | grep -oE '[0-9]+' | awk 'NR==3')" || patch=0
-    major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
-
-    (( major > 0 || minor > 26 || (minor == 26 && patch >= 1) ))
-}
-
 # ── zoxide ────────────────────────────────────────────────────────────────────
 install_zoxide() {
     log_section "zoxide (v0.9.9+)"
@@ -523,71 +471,6 @@ install_zoxide() {
     download "https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh" \
         | env INSTALL_PREFIX="${LOCAL_BIN}" sh
     if has zoxide; then log_ok "zoxide installed: $(ver zoxide)"; fi
-}
-
-# ── tree-sitter CLI ───────────────────────────────────────────────────────────
-install_tree_sitter_cli() {
-    log_section "tree-sitter CLI (v0.26.1+)"
-
-    if tree_sitter_cli_ok && ! $FORCE; then
-        log_ok "tree-sitter CLI already installed: $(tree-sitter --version 2>/dev/null | head -1)"
-        return 0
-    fi
-
-    local version="0.26.9"
-    local os_name arch asset url
-    os_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
-    arch="$(uname -m)"
-
-    case "$os_name" in
-        linux)  os_name="linux" ;;
-        darwin) os_name="macos" ;;
-        *)
-            log_warn "Unsupported OS for automatic tree-sitter CLI binary install: $(uname -s)"
-            log_warn "Install tree-sitter-cli v0.26.1+ manually, then run: nvim +TSUpdate"
-            return 0
-            ;;
-    esac
-
-    case "$arch" in
-        x86_64|amd64)    arch="x64" ;;
-        aarch64|arm64)   arch="arm64" ;;
-        armv7l|armv6l)   arch="arm" ;;
-        i386|i686)       arch="x86" ;;
-        *)
-            log_warn "Unsupported architecture for tree-sitter CLI binary install: ${arch}"
-            log_warn "Install tree-sitter-cli v0.26.1+ manually, then run: nvim +TSUpdate"
-            return 0
-            ;;
-    esac
-
-    asset="tree-sitter-${os_name}-${arch}.gz"
-    url="https://github.com/tree-sitter/tree-sitter/releases/download/v${version}/${asset}"
-
-    log_info "Installing tree-sitter CLI v${version} to ${LOCAL_BIN}…"
-    if $DRY_RUN; then
-        log_dry "download ${url} | gzip -dc > ${LOCAL_BIN}/tree-sitter"
-        log_dry "chmod +x ${LOCAL_BIN}/tree-sitter"
-        return 0
-    fi
-
-    if ! has gzip; then
-        log_error "gzip is required to unpack tree-sitter CLI. Install gzip and re-run setup.sh."
-        return 1
-    fi
-
-    mkdir -p "$LOCAL_BIN"
-    local tmp_file
-    tmp_file="$(mktemp)"
-    if download "$url" | gzip -dc > "$tmp_file"; then
-        chmod +x "$tmp_file"
-        mv "$tmp_file" "${LOCAL_BIN}/tree-sitter"
-        log_ok "tree-sitter CLI installed: $(${LOCAL_BIN}/tree-sitter --version 2>/dev/null | head -1)"
-    else
-        rm -f "$tmp_file"
-        log_error "tree-sitter CLI download/install failed: ${url}"
-        return 1
-    fi
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -799,53 +682,6 @@ inject_bashrc() {
 # Dotfile deployment
 # ══════════════════════════════════════════════════════════════════════════════
 
-migrate_neovim_plugin_origins() {
-    log_section "Neovim plugin migrations"
-
-    local lazy_dir="${XDG_DATA_HOME}/nvim/lazy"
-    if [[ ! -d "$lazy_dir" ]]; then
-        log_info "No lazy.nvim plugin directory found yet; skipping migrations"
-        return 0
-    fi
-
-    _migrate_lazy_origin() {
-        local plugin="$1" old_url="$2" new_url="$3"
-        local plugin_dir="${lazy_dir}/${plugin}"
-
-        if [[ ! -d "${plugin_dir}/.git" ]]; then
-            return 0
-        fi
-
-        local current_url
-        current_url="$(git -C "$plugin_dir" remote get-url origin 2>/dev/null || true)"
-        if [[ "$current_url" == "$old_url" || "$current_url" == *"github.com/williamboman/${plugin}.git" ]]; then
-            if $DRY_RUN; then
-                log_dry "git -C ${plugin_dir} remote set-url origin ${new_url}"
-            else
-                git -C "$plugin_dir" remote set-url origin "$new_url"
-                log_ok "Updated ${plugin} origin → ${new_url}"
-            fi
-        elif [[ "$current_url" == "$new_url" ]]; then
-            log_ok "${plugin} origin is current"
-        elif [[ -n "$current_url" ]]; then
-            log_warn "${plugin} has an unexpected git origin"
-            log_warn "If lazy.nvim complains, run :Lazy update or remove ${plugin_dir}"
-        fi
-    }
-
-    _migrate_lazy_origin \
-        "mason.nvim" \
-        "https://github.com/williamboman/mason.nvim.git" \
-        "https://github.com/mason-org/mason.nvim.git"
-
-    _migrate_lazy_origin \
-        "mason-lspconfig.nvim" \
-        "https://github.com/williamboman/mason-lspconfig.nvim.git" \
-        "https://github.com/mason-org/mason-lspconfig.nvim.git"
-
-    unset -f _migrate_lazy_origin
-}
-
 deploy_dotfiles() {
     log_section "Deploying dotfiles"
 
@@ -860,12 +696,6 @@ deploy_dotfiles() {
 
     # ~/.config/starship.toml
     deploy_file "${REPO_DIR}/starship.toml" "${XDG_CONFIG_HOME}/starship.toml"
-
-    # ~/.config/nvim — modern Neovim setup
-    deploy_path "${REPO_DIR}/nvim" "${XDG_CONFIG_HOME}/nvim"
-
-    # Keep existing lazy.nvim clones compatible when upstream repositories move.
-    migrate_neovim_plugin_origins
 
     # Write manifest only on a real (non-dry-run) run.
     $DRY_RUN || write_manifest
@@ -934,12 +764,6 @@ verify() {
     _check "starship"       starship
     _check "fzf"            fzf
     _check "zoxide"         zoxide
-    _check "tree-sitter"    tree-sitter
-
-    if has tree-sitter && ! tree_sitter_cli_ok; then
-        log_warn "tree-sitter CLI is too old for current nvim-treesitter (need v0.26.1+)"
-        all_ok=false
-    fi
 
     # ble.sh — not a binary, check for the file
     local blesh_file="${XDG_DATA_HOME}/blesh/ble.sh"
@@ -969,7 +793,7 @@ verify() {
     fi
 
     # Symlinked dotfiles
-    for f in "${HOME}/.blerc" "${XDG_CONFIG_HOME}/starship.toml" "${XDG_CONFIG_HOME}/nvim"; do
+    for f in "${HOME}/.blerc" "${XDG_CONFIG_HOME}/starship.toml"; do
         if [[ -e "$f" ]]; then
             log_ok "Deployed: $f"
         else
@@ -1020,9 +844,8 @@ print_done() {
     echo "  1. Open a new terminal  (or: source ~/.bashrc)"
     echo "  2. Install a Nerd Font for Starship icons: https://www.nerdfonts.com/"
     echo "  3. Set your terminal to use the Nerd Font"
-    echo "  4. Open Neovim and let lazy.nvim install plugins automatically"
     if $BACKUP_CREATED; then
-        echo "  5. Your old dotfiles were backed up to: ${BACKUP_DIR}"
+        echo "  4. Your old dotfiles were backed up to: ${BACKUP_DIR}"
         echo "     To restore them: bash uninstall.sh --restore"
     fi
     echo
@@ -1033,7 +856,6 @@ print_done() {
     echo "    CTRL-T         — fuzzy file picker (fzf)"
     echo "    ALT-C          — fuzzy cd (fzf)"
     echo "    starship explain — show what each prompt segment means"
-    echo "    nvim +TSUpdate  — update Neovim Treesitter parsers"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1098,7 +920,6 @@ main() {
         install_bash_completion
         install_fzf
         install_zoxide
-        install_tree_sitter_cli
     fi
 
     deploy_dotfiles

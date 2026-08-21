@@ -20,9 +20,8 @@
 #         - no conflicting fzf --bash eval when ble.sh is present
 #   9.  .blerc: exists and contains fzf integration
 #  10.  starship.toml: exists at the expected location
-#  11.  Neovim config: exists; Neovim and tree-sitter CLI are new enough
-#  12.  History file: exists and is writable
-#  13.  ble.sh + fzf conflict detection
+#  11.  History file: exists and is writable
+#  12.  ble.sh + fzf conflict detection
 #
 # Exit codes:
 #   0  — all checks passed (healthy)
@@ -117,9 +116,8 @@ parse_args() {
                 echo "   8  .bashrc structure: load order, all modules sourced, ble-attach last"
                 echo "   9  .blerc contains fzf integration blocks"
                 echo "  10  starship.toml exists and is well-formed"
-                echo "  11  Neovim config exists; Neovim is ≥ 0.12.2; tree-sitter CLI is ≥ 0.26.1"
-                echo "  12  History file writable"
-                echo "  13  No fzf --bash conflict alongside ble.sh"
+                echo "  11  History file writable"
+                echo "  12  No fzf --bash conflict alongside ble.sh"
                 echo
                 echo "Examples:"
                 echo "  bash doctor.sh                # full check, show all results"
@@ -349,7 +347,6 @@ check_symlinks() {
         links=(
             "${HOME}/.blerc"
             "${XDG_CONFIG_HOME}/starship.toml"
-            "${XDG_CONFIG_HOME}/nvim"
             "${HOME}/.bash/aliases.sh"
             "${HOME}/.bash/bindings.sh"
             "${HOME}/.bash/completion.sh"
@@ -572,73 +569,6 @@ check_starship_toml() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Check: Neovim
-# ══════════════════════════════════════════════════════════════════════════════
-
-check_neovim() {
-    log_section "Neovim"
-
-    local nvim_dir="${XDG_CONFIG_HOME}/nvim"
-
-    if [[ -e "$nvim_dir" ]]; then
-        pass "Neovim config exists: ${nvim_dir}"
-        if [[ -L "$nvim_dir" ]]; then
-            local target
-            target="$(readlink -f "$nvim_dir" 2>/dev/null || true)"
-            if [[ "$target" == "${REPO_DIR}/nvim" ]]; then
-                pass "Neovim config points into this repo"
-            else
-                warn "Neovim config symlink points somewhere unexpected: ${target:-unknown}" \
-                     "Run bash setup.sh --skip-tools to re-link it"
-            fi
-        else
-            warn "Neovim config exists but is not a symlink" \
-                 "If this is your old config, setup.sh should back it up before replacing it"
-        fi
-    elif [[ -L "$nvim_dir" ]]; then
-        fail "Neovim config is a dangling symlink" \
-             "bash setup.sh --skip-tools"
-    else
-        fail "Neovim config missing at ${nvim_dir}" \
-             "bash setup.sh --skip-tools"
-    fi
-
-    if command -v nvim &>/dev/null; then
-        local version major minor patch
-        version="$(nvim --version 2>/dev/null | head -1)"
-        pass "${version}"
-        major="$(echo "$version" | grep -oE '[0-9]+' | awk 'NR==1')" || major=0
-        minor="$(echo "$version" | grep -oE '[0-9]+' | awk 'NR==2')" || minor=0
-        patch="$(echo "$version" | grep -oE '[0-9]+' | awk 'NR==3')" || patch=0
-        major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
-        if (( major == 0 && (minor < 12 || (minor == 12 && patch < 2)) )); then
-            warn "Neovim is older than v0.12.2" \
-                 "Upgrade Neovim before using this config"
-        fi
-    else
-        warn "nvim not found on PATH" \
-             "Install Neovim v0.12.2+; setup.sh deploys config but does not install Neovim"
-    fi
-
-    if command -v tree-sitter &>/dev/null; then
-        local ts_version ts_major ts_minor ts_patch
-        ts_version="$(tree-sitter --version 2>/dev/null | head -1)"
-        pass "${ts_version}"
-        ts_major="$(echo "$ts_version" | grep -oE '[0-9]+' | awk 'NR==1')" || ts_major=0
-        ts_minor="$(echo "$ts_version" | grep -oE '[0-9]+' | awk 'NR==2')" || ts_minor=0
-        ts_patch="$(echo "$ts_version" | grep -oE '[0-9]+' | awk 'NR==3')" || ts_patch=0
-        ts_major="${ts_major:-0}"; ts_minor="${ts_minor:-0}"; ts_patch="${ts_patch:-0}"
-        if (( ts_major == 0 && (ts_minor < 26 || (ts_minor == 26 && ts_patch < 1)) )); then
-            warn "tree-sitter CLI is older than 0.26.1" \
-                 "Run bash setup.sh to install the managed tree-sitter CLI into ~/.local/bin"
-        fi
-    else
-        warn "tree-sitter CLI not found" \
-             "Run bash setup.sh to install tree-sitter CLI into ~/.local/bin"
-    fi
-}
-
-# ══════════════════════════════════════════════════════════════════════════════
 # Check: history file
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -710,7 +640,6 @@ main() {
     check_symlinks
     check_bashrc
     check_starship_toml
-    check_neovim
     check_history
 
     print_summary

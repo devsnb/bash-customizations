@@ -1,8 +1,8 @@
 # bash-customizations
 
-A clean, modular Bash setup built around five best-in-class shell tools plus a modern Neovim configuration.
+A clean, modular Bash setup built around five best-in-class shell tools.
 
-```/dev/null/tree.txt#L1-14
+```/dev/null/tree.txt#L1-13
 ~
 ├── .bashrc                  ← thin orchestrator (load order only)
 ├── .blerc                   ← ble.sh config + fzf integration
@@ -15,15 +15,14 @@ A clean, modular Bash setup built around five best-in-class shell tools plus a m
 │   ├── functions.sh         ← utility shell functions
 │   ├── aliases.sh           ← aliases (ls, git, docker, …)
 │   └── prompt.sh            ← Starship init + fallback PS1
-├── starship.toml            ← Starship config (symlinked → ~/.config/)
-└── nvim/                    ← Neovim config (symlinked → ~/.config/nvim)
+└── starship.toml            ← Starship config (symlinked → ~/.config/)
 ```
 
 ---
 
 ## Repository layout
 
-Files inside `bash/` are symlinked as `~/.bash/`; `.blerc`, `starship.toml`, and `nvim/` are symlinked into the expected dotfile locations. The three root-level scripts stay at the repo root so they can always be run with `bash <script>.sh` from any directory.
+Files inside `bash/` are symlinked as `~/.bash/`; `.blerc` and `starship.toml` are symlinked into the expected dotfile locations. The three root-level scripts stay at the repo root so they can always be run with `bash <script>.sh` from any directory.
 
 **`~/.bashrc` is never replaced.** Instead, `setup.sh` injects two clearly marked blocks into your existing `~/.bashrc`:
 
@@ -54,10 +53,8 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 | [bash-completion](https://github.com/scop/bash-completion) | v2.17.0 | Tab-completion ecosystem for hundreds of CLI tools |
 | [fzf](https://github.com/junegunn/fzf) | v0.62.0 | Fuzzy file finder — CTRL-T, CTRL-R, ALT-C |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | v0.9.9 | Frecency-ranked directory jumper (`z`, `zi`) |
-| [tree-sitter CLI](https://tree-sitter.github.io/tree-sitter/) | v0.26.9 | Parser builder required by current `nvim-treesitter` |
-| [Neovim](https://neovim.io) | v0.12.2+ | Modern editor setup with Lua, lazy.nvim, LSP, completion, Treesitter, Telescope, and a polished UI |
 
-> Versions listed are what `setup.sh` targets. Run `bash doctor.sh` to see what is actually installed on your system. Neovim itself is not installed by `setup.sh`; this repo deploys its configuration.
+> Versions listed are what `setup.sh` targets. Run `bash doctor.sh` to see what is actually installed on your system.
 
 ---
 
@@ -77,9 +74,7 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 |---|---|---|
 | Bash ≥ 4.2 | associative arrays, `[[ ]]` features | `bash --version` |
 | `curl` or `wget` | downloading tools | `command -v curl` |
-| `git` | fzf and lazy.nvim plugin bootstrap | `command -v git` |
-| Neovim ≥ 0.12.2 | editor configuration target | `nvim --version` |
-| tree-sitter CLI ≥ 0.26.1 | building Neovim Treesitter parsers; installed/updated by `setup.sh` | `tree-sitter --version` |
+| `git` | fzf install | `command -v git` |
 | **en_US.UTF-8 locale** | **ble.sh needs it — missing locale causes garbage in prompt** | `locale -a \| grep en_US` |
 
 ### Install the locale (WSL / Ubuntu / Debian)
@@ -133,45 +128,6 @@ You can also invoke the scripts directly if you prefer:
 | `-h`, `--help` | Print usage, examples, and recovery hints, then exit |
 
 To upgrade installed tools to their latest versions, run `make update` or `bash setup.sh --force`. See [Updating tools](#updating-tools) for per-tool commands.
-
----
-
-## Neovim setup
-
-The repository includes a clean Lua-based Neovim setup under `nvim/`. `setup.sh` symlinks it to `~/.config/nvim`, backing up any existing Neovim config first.
-
-Highlights:
-
-- Relative and absolute line numbers enabled by default.
-- Space as the leader key.
-- `lazy.nvim` bootstrap on first launch.
-- `tokyonight` theme, `lualine`, rounded UI borders, indent guides, and helpful keymap hints via `which-key`.
-- Command palette-style `:` prompt via `noice.nvim`, so commands like `:q`, `:w`, and searches appear in a clean centered popup.
-- `Telescope` file/search picker and `neo-tree` file explorer.
-- Treesitter syntax highlighting for common shell, web, Lua, Markdown, and config formats.
-- Built-in Neovim LSP configured with the modern `vim.lsp.config()` / `vim.lsp.enable()` flow used by Neovim 0.11+.
-- `mason.nvim` + `mason-lspconfig.nvim` for easy language-server installation.
-- `blink.cmp` completion, `gitsigns`, autopairs, and `conform.nvim` formatting.
-
-Useful default mappings:
-
-| Mapping | Action |
-|---|---|
-| `<leader>ff` | Find files |
-| `<leader>fg` | Live grep |
-| `<leader>fb` | Switch buffers |
-| `<leader>e` | Toggle file explorer |
-| `<leader>f` | Format current buffer / selection |
-| `<leader>dd` | Show diagnostic under cursor |
-| `<leader>nh` | Show Noice notification/message history |
-| `<leader>nl` | Show last notification/message |
-| `<leader>nd` | Dismiss notifications/messages |
-| `[d` / `]d` | Previous / next diagnostic |
-| `gd` / `gr` / `K` | Definition / references / hover when LSP is attached |
-
-After installation, open `nvim`. The first launch downloads plugins automatically. Run `:Lazy` to inspect plugin state and `:Mason` to install or manage language servers and formatters.
-
-For Treesitter parser installation, the current `nvim-treesitter` requires `tree-sitter` CLI `0.26.1+`. `setup.sh` installs a current CLI into `~/.local/bin/tree-sitter` so it takes precedence over older distro packages. If you installed dotfiles with `--skip-tools`, run `bash setup.sh` or `make install` to install/update the CLI, then run `:TSInstall bash lua markdown vimdoc yaml` or `:TSInstall all` if you want every parser.
 
 ---
 
@@ -361,7 +317,7 @@ ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 ## Module reference
 
 ### `exports.sh`
-- **EDITOR / VISUAL** — defaults to `nvim`; change at the top of `exports.sh` if preferred
+- **EDITOR / VISUAL** — defaults to `nano`; change at the top of `exports.sh` if preferred
 - **PATH** — prepends `~/.local/bin`, `~/bin`, `~/.cargo/bin` (only if they exist)
 - **XDG** — sets `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`
 - **MANPAGER / MANROFFOPT** — coloured man pages via `less --use-color` (bold=red, underline=blue)
@@ -421,7 +377,7 @@ ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 - **Disk usage** — `df -h`, `du -h`, `dud` (subdirectory sizes), `duf` (files in current dir)
 - **Processes** — `psa` (`ps auxf`), `psg <name>` (grep process list)
 - **Network** — `ping -c 5`, `ports` (`ss -tulpn` — list listening ports)
-- **Editor** — `v` / `vi` → `$EDITOR` (defaults to `nvim`)
+- **Editor** — `v` / `vi` → `$EDITOR` (defaults to `nano`)
 - **git** — `gs`, `gl`, `gd`, `gc`, `gp`, `gpl`, `gco`, `gst`, …
 - **docker** — `dk`, `dkps`, `dkpsa`, `dki`, `dkrm`, `dkrmi`, `dkx`, `dkl`, `dkc`, `dkcu`, `dkcd` (only if `docker` is installed)
 - **System** — `h` (history), `j` (jobs), `path` (print `$PATH` entries one per line), `now` (current datetime), `week` (ISO week number), `cls` (full terminal reset including scrollback)
