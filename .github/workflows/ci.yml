@@ -1,0 +1,50 @@
+name: CI
+
+# GitHub Actions is free with unlimited standard-runner minutes on public
+# repositories, so every push and pull request gets the full suite.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes the older run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint (shellcheck + bash -n)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: Lint
+        run: make lint
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests
+        run: make test-unit
+
+  roundtrip:
+    name: round trip (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Run every environment even when one fails — knowing whether a bug is
+      # specific to "no sudo" or universal is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        environment:
+          - sudo-user     # ordinary user with passwordless sudo
+          - user-nosudo   # ordinary user, no sudo installed
+          - root-nosudo   # root, no sudo installed (the container case)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install → doctor → uninstall → restore
+        run: bash tests/docker.sh ${{ matrix.environment }}
