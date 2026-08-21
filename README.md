@@ -107,25 +107,58 @@ Run `make` (or `make help`) to see all available targets:
 |---|---|
 | `make install` | Install all tools + deploy dotfiles |
 | `make dotfiles` | Deploy dotfiles only (tools already installed) |
-| `make update` | Reinstall / upgrade all tools to latest versions |
+| `make update` | Upgrade all tools **and** re-deploy dotfiles |
 | `make dry-run` | Preview what install would do without making changes |
 | `make doctor` | Diagnose the setup and show fix instructions |
+| `make doctor-quiet` | Same, printing only failures and warnings |
 | `make uninstall` | Remove managed symlinks and blocks from `~/.bashrc` |
-| `make restore` | Uninstall and restore the most recent backup |
-| `make purge` | Uninstall and remove all tool binaries |
-| `make list-backups` | List available backup timestamps |
+| `make uninstall-dry` | Preview exactly what uninstall would remove |
+| `make restore` | Uninstall and restore a backup — `BACKUP=<timestamp>` to pick one |
+| `make restore-only` | Restore a backup **without** uninstalling |
+| `make purge-tools` | Uninstall and remove all tool binaries |
+| `make list-backups` | List available backups |
+| `make prune-backups` | Delete all but the newest backups — `KEEP=<n>` (default 5) |
+| `make lint` | `bash -n` + shellcheck every script |
+| `make test` | Unit tests + the container round trip |
+| `make check` | Lint and test — what CI runs |
 
 You can also invoke the scripts directly if you prefer:
 
 ### Script flags
+
+**`setup.sh`**
 
 | Flag | Effect |
 |---|---|
 | *(none)* | Install all tools + deploy dotfiles |
 | `--dry-run` | Show what would happen, change nothing |
 | `--skip-tools` | Deploy dotfiles only (tools already installed) |
-| `--force` | Re-install even if a tool is already present |
+| `--force` | Re-install tools even if already present |
 | `-h`, `--help` | Print usage, examples, and recovery hints, then exit |
+
+**`uninstall.sh`**
+
+| Flag | Effect |
+|---|---|
+| *(none)* | Remove managed symlinks and the `~/.bashrc` blocks |
+| `--dry-run` | Show what would happen, change nothing |
+| `-y`, `--yes` | Answer every prompt with yes — **required when there is no terminal** |
+| `--restore` | Uninstall, then restore a backup |
+| `--restore=TIMESTAMP` | Restore a specific backup (see `--list-backups`) |
+| `--restore-only[=TS]` | Restore a backup *without* uninstalling |
+| `--purge-tools` | Also remove tool binaries (starship, fzf, zoxide, ble.sh) |
+| `--list-backups` | List available backups and exit |
+| `--prune-backups[=N]` | Delete all but the newest N backups (default 5) and exit |
+| `--delete-backup=TS` | Delete one backup and exit |
+| `-h`, `--help` | Print usage and exit |
+
+**`doctor.sh`**
+
+| Flag | Effect |
+|---|---|
+| *(none)* | Run every check and print the results |
+| `-q`, `--quiet` | Print only failures and warnings |
+| `-h`, `--help` | Print usage, the check list, and exit codes |
 
 To upgrade installed tools to their latest versions, run `make update` or `bash setup.sh --force`. See [Updating tools](#updating-tools) for per-tool commands.
 
@@ -134,15 +167,23 @@ To upgrade installed tools to their latest versions, run `make update` or `bash 
 ## Uninstalling
 
 ```sh
-make restore                                    # remove symlinks + restore latest backup
-make purge                                      # also remove tool binaries
+make uninstall-dry                              # preview exactly what would be removed
+make restore                                    # remove symlinks + restore your backup
+make restore BACKUP=20250604_142301             # restore one specific backup
+make purge-tools                                # also remove tool binaries
 
 # Or with the script directly:
 bash uninstall.sh --dry-run                     # preview what would be removed
 bash uninstall.sh --list-backups                # show available timestamps
 bash uninstall.sh --restore=20250604_142301     # restore a specific backup
+bash uninstall.sh --restore-only=20250604_142301  # restore without uninstalling
 bash uninstall.sh --restore --purge-tools       # full removal including binaries
+bash uninstall.sh --yes                         # no prompts (scripts, CI, ssh)
 ```
+
+**Which backup does `--restore` pick?** The one recorded in the install manifest —
+the run that produced your current setup — and only if that is gone does it fall
+back to the newest on disk. Pass `--restore=TIMESTAMP` to be explicit.
 
 **Safety guarantees of `uninstall.sh`:**
 - Removes only the two managed blocks from `~/.bashrc`; all other content is untouched
@@ -150,7 +191,10 @@ bash uninstall.sh --restore --purge-tools       # full removal including binarie
 - Verifies each symlink points back into this repo before touching it
 - Falls back to a hardcoded default list if no manifest exists
 - Never removes system packages (`bash-completion` stays)
-- Always asks for confirmation before `--purge-tools`
+- Always asks for confirmation before removing anything, and again before `--purge-tools`
+- Without a terminal to ask, it **exits 1 instead of doing nothing quietly** — pass `--yes` to proceed
+- Validates a `--restore=TIMESTAMP` *before* touching anything, so a typo cannot leave a half-uninstalled shell
+- A restore replaces real files (including `~/.bashrc`) and snapshots whatever it overwrites into `~/.bash_backup/<ts>-pre-restore/`
 
 ---
 
@@ -162,8 +206,13 @@ bash doctor.sh
 
 # Failures only (good for CI or scripting)
 bash doctor.sh --quiet
-echo "Exit: $?"   # 0 = healthy, 1 = issues found
+echo "Exit: $?"   # 0 = no failures, 1 = one or more failures
 ```
+
+**Exit codes.** `0` means nothing is broken; `1` means at least one check failed.
+Warnings — a missing non-interactive guard, an optional package, a shell that
+predates the install — are advisory and never change the exit code, so
+`doctor.sh` is safe to gate a script on.
 
 `doctor.sh` checks **12 things** and prints a `→ Fix:` instruction for every failure:
 
@@ -245,7 +294,11 @@ Every time `setup.sh` overwrites a file it didn't create (i.e. a real file, not 
 ```
 ~/.bash_backup/<YYYYMMDD_HHMMSS>/
 ```
-Multiple runs create multiple timestamped backup directories. `uninstall.sh --restore` uses the backup directory recorded in the manifest (the one that corresponds to *your* install run), not just the most recent directory.
+Multiple runs create multiple timestamped backup directories. They accumulate
+indefinitely, so `bash uninstall.sh --prune-backups[=N]` (or `make prune-backups
+KEEP=<n>`) trims them to the newest N — 5 by default — and `--delete-backup=TS`
+removes a single one. `--list-backups` marks the one your current install came
+from. `uninstall.sh --restore` uses the backup directory recorded in the manifest (the one that corresponds to *your* install run), not just the most recent directory.
 
 ---
 
@@ -455,16 +508,52 @@ After upgrading, open a new terminal and run `bash doctor.sh` to verify everythi
 
 ---
 
+## Testing
+
+The scripts rewrite `~/.bashrc` and deploy symlinks into `$HOME`, so they are
+tested where that is safe to do for real: in throwaway containers.
+
+```sh
+make lint         # bash -n on every script + shellcheck (skipped if not installed)
+make test-unit    # module behaviour and argument handling — no container needed
+make test-docker  # the full install → doctor → uninstall → restore round trip
+make check        # everything CI runs
+```
+
+`make test-docker` builds three environments from `tests/integration/Dockerfile`
+and runs the same suite in each, because the interesting failures are
+environmental:
+
+| Environment | What it proves |
+|---|---|
+| `sudo-user` | The ordinary case: a normal user with passwordless sudo |
+| `user-nosudo` | A user with no sudo — optional system packages are skipped, not fatal |
+| `root-nosudo` | Root with no `sudo` binary — the container case, where `sudo apt-get` cannot work |
+
+The round trip asserts the things that are hard to notice by hand: that a second
+`setup.sh` adds no duplicate blocks, that `--dry-run` changes nothing at all,
+that a mistyped `--restore=TIMESTAMP` leaves the install untouched, that an
+uninstall with no terminal and no `--yes` exits non-zero, and that a restore
+brings `~/.bashrc` back byte-for-byte.
+
+It skips with an explanation when Docker is not running, so `make test` stays
+useful without it. CI runs all three environments on every push and pull request
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+---
+
 ## Contributing
 
 1. Fork the repository and create a branch.
 2. Edit files in `bash/` or the root scripts.
-3. Test with `bash setup.sh --dry-run` and `bash doctor.sh`.
+3. Run `make check` — lint, unit tests, and the container round trip.
 4. Add or update inline comments for any behaviour that isn't obvious.
 5. Open a pull request — describe what changed and why.
 
 Code style:
-- All bash files must pass `bash -n <file>` (syntax check).
+- All bash files must pass `bash -n <file>` and `shellcheck --severity=warning`.
+- Silencing a shellcheck finding needs an inline `# shellcheck disable=` with a reason;
+  only repo-wide false positives belong in `.shellcheckrc`.
 - Use `if command -v TOOL &>/dev/null; then` before calling optional tools.
 - Guard `&&` chains that could return non-zero with `if`/`fi` (required by `set -e`).
 - Document new functions with a one-line description in `functions.sh` and a row in the README table.
