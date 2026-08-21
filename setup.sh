@@ -96,9 +96,49 @@ run() {
 # has CMD — true if the command exists on PATH.
 has() { command -v "$1" &>/dev/null; }
 
+# _as_root CMD [args…] — run a command with root privileges, if we can.
+#
+# Bare `sudo` is wrong in two common cases: inside a container the user is
+# already root and sudo often is not installed at all, and on a locked-down box
+# there is no sudo access to be had.  Under `set -euo pipefail` either one used
+# to abort the whole install partway through.  Returns non-zero (without
+# running anything) when privileges are unavailable, so callers can decide
+# whether the step was essential.
+_as_root() {
+    if $DRY_RUN; then
+        log_dry "$([[ $EUID -eq 0 ]] || echo 'sudo ')$*"
+        return 0
+    fi
+    if [[ $EUID -eq 0 ]]; then
+        "$@"
+    elif has sudo; then
+        sudo "$@"
+    else
+        log_warn "Root privileges needed but 'sudo' is not available: $*"
+        return 1
+    fi
+}
+
+# root_available — true if a privileged command could be run at all.
+root_available() { [[ $EUID -eq 0 ]] || has sudo; }
+
 # ver CMD — print version string (best-effort).
 ver() {
     "$1" --version 2>/dev/null | head -1 || true
+}
+
+# replace_file TMP DEST — move a rewritten temp file into place, keeping DEST's
+# original permissions.  mktemp creates 0600 files and mv carries that mode
+# across, which would silently tighten ~/.bashrc on every run.
+replace_file() {
+    local tmp="$1" dest="$2"
+    local mode=""
+    if [[ -f "$dest" ]]; then
+        mode="$(stat -c '%a' "$dest" 2>/dev/null || stat -f '%Lp' "$dest" 2>/dev/null || true)"
+    fi
+    mv "$tmp" "$dest"
+    [[ -n "$mode" ]] && chmod "$mode" "$dest"
+    return 0
 }
 
 # backup TARGET — copy TARGET to BACKUP_DIR if it exists and is not a symlink
@@ -117,7 +157,11 @@ backup_if_exists() {
     # reconstruct the original path.  e.g. ~/.config/starship.toml is backed
     # up as $BACKUP_DIR/.config/starship.toml, not flat as $BACKUP_DIR/starship.toml.
     local rel_path="${target#"${HOME}/"}"
-    log_info "Backing up $target → $BACKUP_DIR/${rel_path}"
+    if $DRY_RUN; then
+        log_dry "Back up $target → $BACKUP_DIR/${rel_path}"
+    else
+        log_info "Backing up $target → $BACKUP_DIR/${rel_path}"
+    fi
     run mkdir -p "${BACKUP_DIR}/$(dirname "$rel_path")"
     run cp -a "$target" "${BACKUP_DIR}/${rel_path}"
     BACKUP_CREATED=true
@@ -251,6 +295,31 @@ check_prerequisites() {
         log_ok "git $(git --version)"
     fi
 
+    # tar + xz — ble.sh ships as a .tar.xz and is unpacked with `tar -xJf`.
+    # Without these the failure surfaces late and cryptically, mid-download.
+    if ! has tar; then
+        log_error "tar is required to unpack ble.sh."
+        exit 1
+    fi
+    log_ok "tar $(tar --version 2>/dev/null | head -1)"
+    if ! has xz; then
+        log_warn "xz not found — ble.sh (.tar.xz) cannot be unpacked."
+        log_warn "  Debian/Ubuntu: sudo apt-get install -y xz-utils"
+    fi
+
+    # Say up front that some steps need root, rather than surprising the user
+    # with a password prompt halfway through the run.
+    if ! $SKIP_TOOLS; then
+        if [[ $EUID -eq 0 ]]; then
+            log_info "Running as root — package installs will not use sudo."
+        elif has sudo; then
+            log_info "Some optional steps (bash-completion, locale) may ask for your sudo password."
+        else
+            log_warn "No sudo available — package installs and locale generation will be skipped."
+            log_warn "Everything installed into ~/.local/bin works without root."
+        fi
+    fi
+
     # make is not required by this setup (ble.sh installs from a pre-built tarball).
     if has make; then log_ok "make $(make --version 2>/dev/null | head -1)"; fi
 
@@ -342,34 +411,54 @@ install_bash_completion() {
         return 0
     fi
 
+    # bash-completion is the one dependency that lives in system paths, so it is
+    # also the one that needs root.  It is a nice-to-have, not a prerequisite:
+    # a failure here must never take the rest of the install down with it.
+    if ! has brew && ! root_available; then
+        log_warn "Skipping bash-completion — needs root and no sudo is available."
+        log_warn "Install it yourself later: <your package manager> install bash-completion"
+        return 0
+    fi
+
     log_info "Installing bash-completion via system package manager…"
 
     if $DRY_RUN; then
-        if has apt-get;  then  log_dry "sudo apt-get install -y bash-completion"
-        elif has dnf;    then  log_dry "sudo dnf install -y bash-completion"
-        elif has pacman; then  log_dry "sudo pacman -S --noconfirm bash-completion"
+        if has apt-get;  then  log_dry "apt-get update && apt-get install -y bash-completion"
+        elif has dnf;    then  log_dry "dnf install -y bash-completion"
+        elif has pacman; then  log_dry "pacman -S --noconfirm bash-completion"
         elif has brew;   then  log_dry "brew install bash-completion@2"
         else                   log_dry "<package manager> install bash-completion"
         fi
         return 0
     fi
 
+    local installed=false
     if has apt-get; then
-        sudo apt-get install -y bash-completion
+        # A container image's package lists are usually stale; without an update
+        # the install fails with "Unable to locate package".
+        _as_root apt-get update -qq \
+            && _as_root apt-get install -y bash-completion && installed=true
     elif has dnf; then
-        sudo dnf install -y bash-completion
+        _as_root dnf install -y bash-completion && installed=true
     elif has pacman; then
-        sudo pacman -S --noconfirm bash-completion
+        _as_root pacman -S --noconfirm bash-completion && installed=true
     elif has zypper; then
-        sudo zypper install -y bash-completion
+        _as_root zypper install -y bash-completion && installed=true
     elif has brew; then
-        brew install bash-completion@2
+        brew install bash-completion@2 && installed=true
     else
         log_warn "No supported package manager found."
         log_warn "Please install bash-completion manually: https://github.com/scop/bash-completion"
         return 0
     fi
-    log_ok "bash-completion installed."
+
+    if $installed; then
+        log_ok "bash-completion installed."
+    else
+        log_warn "bash-completion could not be installed — continuing without it."
+        log_warn "Tab-completion for third-party tools will be limited."
+    fi
+    return 0
 }
 
 # ── fzf ───────────────────────────────────────────────────────────────────────
@@ -409,14 +498,18 @@ install_fzf() {
         # ~/.local/bin so it's on the PATH we manage in exports.sh.
         if [[ -f "${HOME}/.fzf/bin/fzf" ]]; then
             ln -sf "${HOME}/.fzf/bin/fzf" "${LOCAL_BIN}/fzf"
+            # Deliberately NOT added to DEPLOYED_LINKS: the manifest means
+            # "symlinks into this repo", and both uninstall.sh and doctor.sh
+            # treat anything else as suspicious.  This link belongs to the fzf
+            # install and is cleaned up by --purge-tools instead.
             log_ok "Linked ~/.fzf/bin/fzf → ${LOCAL_BIN}/fzf"
         fi
-    elif has apt-get; then
-        sudo apt-get install -y fzf
-    elif has dnf; then
-        sudo dnf install -y fzf
-    elif has pacman; then
-        sudo pacman -S --noconfirm fzf
+    elif has apt-get && root_available; then
+        _as_root apt-get update -qq && _as_root apt-get install -y fzf
+    elif has dnf && root_available; then
+        _as_root dnf install -y fzf
+    elif has pacman && root_available; then
+        _as_root pacman -S --noconfirm fzf
     elif has brew; then
         brew install fzf
     else
@@ -548,7 +641,7 @@ _rewrite_block() {
             echo "$line"
         fi
     done < "$file" > "$tmp"
-    mv "$tmp" "$file"
+    replace_file "$tmp" "$file"
 }
 
 # _inject_blocks FILE HEAD_FILE TAIL_FILE
@@ -580,7 +673,7 @@ _inject_blocks() {
 
     # Append TAIL block
     { cat "$tmp"; echo ""; cat "$tail_file"; } > "${tmp}.out"
-    mv "${tmp}.out" "$file"
+    replace_file "${tmp}.out" "$file"
     rm -f "$tmp"
 }
 
@@ -610,7 +703,7 @@ _ensure_noninteractive_guard() {
         fi
         echo "$line"
     done < "$file" > "$tmp"
-    mv "$tmp" "$file"
+    replace_file "$tmp" "$file"
     GUARD_ADDED=true
     log_ok "Non-interactive guard added"
 }
@@ -705,6 +798,18 @@ deploy_dotfiles() {
 write_manifest() {
     mkdir -p "${MANIFEST_DIR}"
 
+    # A re-run usually creates no new backup (there is nothing left to displace
+    # but our own symlinks).  Carry the existing pointer forward rather than
+    # blanking it — it is the only record of which snapshot predates the very
+    # first install, and uninstall.sh --restore is documented to use exactly
+    # that one.  Without this, a second setup.sh silently downgraded --restore
+    # to "whatever backup happens to be newest".
+    local previous_backup=""
+    if [[ -f "${MANIFEST_FILE}" ]]; then
+        previous_backup="$(grep -m1 '^BACKUP=' "${MANIFEST_FILE}" 2>/dev/null || true)"
+        previous_backup="${previous_backup#BACKUP=}"
+    fi
+
     # Preserve previous manifests as a simple history (rotate: keep last 5).
     if [[ -f "${MANIFEST_FILE}" ]]; then
         local ts
@@ -729,7 +834,7 @@ write_manifest() {
         if $BACKUP_CREATED; then
             echo "BACKUP=${BACKUP_DIR}"
         else
-            echo "BACKUP="
+            echo "BACKUP=${previous_backup}"
         fi
         $GUARD_ADDED && echo "GUARD_ADDED=true"
         # ${arr[@]+"${arr[@]}"} is the correct set -u safe idiom for arrays:
@@ -749,7 +854,14 @@ write_manifest() {
 verify() {
     log_section "Verification"
 
+    # Two different kinds of "not ok":
+    #   all_ok      — something this script was supposed to do and did not.
+    #   advisories  — something it deliberately skipped because the environment
+    #                 does not allow it (no root for a system package).  On a
+    #                 sudo-less machine that is the expected outcome, not a
+    #                 failed install, so it must not make the run exit non-zero.
     local all_ok=true
+    local advisories=0
 
     _check() {
         local name="$1" cmd="$2"
@@ -774,13 +886,14 @@ verify() {
         all_ok=false
     fi
 
-    # bash-completion — check for the main script
+    # bash-completion — check for the main script.  It lives in system paths and
+    # needs root to install, so its absence is advisory rather than a failure.
     if [[ -f /usr/share/bash-completion/bash_completion ]] \
         || [[ -f /usr/local/share/bash-completion/bash_completion ]]; then
         log_ok "bash-completion: found"
     else
-        log_warn "bash-completion: not found"
-        all_ok=false
+        log_warn "bash-completion: not found (needs root to install — optional)"
+        (( advisories++ )) || true
     fi
 
     # ~/.bashrc — check for injected blocks
@@ -815,12 +928,18 @@ verify() {
 
     echo
     if $all_ok; then
-        log_ok "All checks passed."
-    else
-        log_warn "Some items need attention (see above)."
-        log_warn "Run bash doctor.sh for a detailed diagnosis."
-        log_warn "Open a new terminal or run:  source ~/.bashrc"
+        if [[ "$advisories" -gt 0 ]]; then
+            log_ok "All required checks passed (${advisories} optional item(s) skipped)."
+        else
+            log_ok "All checks passed."
+        fi
+        return 0
     fi
+
+    log_warn "Some items need attention (see above)."
+    log_warn "Run bash doctor.sh for a detailed diagnosis."
+    log_warn "Open a new terminal or run:  source ~/.bashrc"
+    return 1
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -837,8 +956,18 @@ print_banner() {
     if $SKIP_TOOLS; then echo -e "${YELLOW}  --skip-tools — dotfile deployment only${RESET}\n"; fi
 }
 
+# print_done VERIFIED — closing summary.  VERIFIED is "true" only when every
+# post-install check passed; anything else must not be announced as success.
 print_done() {
-    echo -e "\n${BOLD}${GREEN}Setup complete!${RESET}"
+    local verified="${1:-true}"
+
+    if [[ "$verified" == "true" ]]; then
+        echo -e "\n${BOLD}${GREEN}Setup complete!${RESET}"
+    else
+        echo -e "\n${BOLD}${YELLOW}Setup finished with warnings.${RESET}"
+        echo -e "${YELLOW}  Your dotfiles are deployed, but some checks did not pass.${RESET}"
+        echo -e "${YELLOW}  Run 'bash doctor.sh' to see exactly what is wrong.${RESET}"
+    fi
     echo
     echo "  Next steps:"
     echo "  1. Open a new terminal  (or: source ~/.bashrc)"
@@ -884,17 +1013,25 @@ ensure_locale() {
     log_warn "garbage escape sequences in the prompt ('>0;10;1c', '2;1R', …)"
 
     if $DRY_RUN; then
-        log_dry "sudo locale-gen en_US.UTF-8"
-        log_dry "sudo update-locale LANG=en_US.UTF-8"
+        log_dry "locale-gen en_US.UTF-8"
+        log_dry "update-locale LANG=en_US.UTF-8"
         return 0
     fi
 
     # locale-gen is available on Debian/Ubuntu/WSL — use it automatically.
-    if has locale-gen; then
-        log_info "Generating en_US.UTF-8 locale (requires sudo)…"
-        sudo locale-gen en_US.UTF-8
-        sudo update-locale LANG=en_US.UTF-8
-        log_ok "Locale generated. Open a new terminal to apply."
+    # This runs before every installer, so it must never abort the run: a
+    # missing locale degrades ble.sh's rendering, it does not break the setup.
+    if has locale-gen && root_available; then
+        log_info "Generating en_US.UTF-8 locale (needs root)…"
+        if _as_root locale-gen en_US.UTF-8 && _as_root update-locale LANG=en_US.UTF-8; then
+            log_ok "Locale generated. Open a new terminal to apply."
+        else
+            log_warn "Locale generation failed — continuing."
+            log_warn "Fix it later with: sudo locale-gen en_US.UTF-8"
+        fi
+    elif has locale-gen; then
+        log_warn "locale-gen needs root and no sudo is available — skipping."
+        log_warn "Fix it later with: sudo locale-gen en_US.UTF-8"
     else
         # Other distros: print manual instructions.
         log_warn "locale-gen not found. Generate the locale manually:"
@@ -923,8 +1060,14 @@ main() {
     fi
 
     deploy_dotfiles
-    verify
-    if ! $DRY_RUN; then print_done; fi
+
+    # verify() returns non-zero when something is off; don't hide that behind a
+    # green "Setup complete!" banner.
+    local verified=true
+    verify || verified=false
+
+    if ! $DRY_RUN; then print_done "$verified"; fi
+    $verified
 }
 
 main "$@"
