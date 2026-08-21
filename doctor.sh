@@ -24,8 +24,8 @@
 #  12.  ble.sh + fzf conflict detection
 #
 # Exit codes:
-#   0  — all checks passed (healthy)
-#   1  — one or more checks failed (issues found)
+#   0  — no failures (warnings may still be present; they are advisory)
+#   1  — one or more checks failed
 #
 # Usage:
 #   bash doctor.sh           # full check
@@ -43,14 +43,19 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
 LOCAL_BIN="${HOME}/.local/bin"
 MANIFEST_FILE="${HOME}/.local/share/bash-customizations/manifest"
 
-# Block markers (must match setup.sh)
+# Block markers (must match setup.sh).  The END markers are part of the
+# contract with setup.sh/uninstall.sh and are kept here for that reason, even
+# though the checks below only need to locate the BEGIN lines.
 BLOCK_HEAD_BEGIN="# === BEGIN bash-customizations ==="
-BLOCK_HEAD_END="# === END bash-customizations ==="
 BLOCK_TAIL_BEGIN="# === BEGIN bash-customizations-attach ==="
+# shellcheck disable=SC2034  # kept to document the marker contract with setup.sh
+BLOCK_HEAD_END="# === END bash-customizations ==="
+# shellcheck disable=SC2034  # kept to document the marker contract with setup.sh
 BLOCK_TAIL_END="# === END bash-customizations-attach ==="
 
 QUIET=false          # set by --quiet flag
-ISSUES=0             # incremented for every FAIL or WARN
+FAILURES=0           # incremented for every FAIL — these decide the exit code
+WARNINGS=0           # incremented for every WARN — advisory, never fails the run
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Colours & output helpers
@@ -72,7 +77,7 @@ fail() {
     local msg="$1" fix="${2:-}"
     echo -e "  ${RED}✘${RESET}  ${BOLD}${msg}${RESET}"
     if [[ -n "$fix" ]]; then echo -e "       ${YELLOW}→ Fix:${RESET} ${fix}"; fi
-    (( ISSUES++ )) || true
+    (( FAILURES++ )) || true
 }
 
 # warn MESSAGE SUGGESTION
@@ -80,7 +85,7 @@ warn() {
     local msg="$1" suggestion="${2:-}"
     echo -e "  ${YELLOW}!${RESET}  ${msg}"
     if [[ -n "$suggestion" ]]; then echo -e "       ${YELLOW}→ Tip:${RESET} ${suggestion}"; fi
-    (( ISSUES++ )) || true
+    (( WARNINGS++ )) || true
 }
 
 # info MESSAGE — informational, never counts as an issue.
@@ -103,7 +108,7 @@ parse_args() {
                 echo "Options:"
                 echo "  --quiet   Only print failures and warnings (suppress passing checks)"
                 echo
-                echo "Exit codes: 0 = healthy, 1 = one or more issues found"
+                echo "Exit codes: 0 = no failures (warnings are advisory), 1 = one or more failures"
                 echo
                 echo "Checks performed:"
                 echo "   1  Bash version ≥ 4.2"
@@ -159,15 +164,31 @@ check_path() {
 
     if [[ ":${PATH}:" == *":${LOCAL_BIN}:"* ]]; then
         pass "~/.local/bin is on PATH"
+    elif [[ -f "${HOME}/.bash/exports.sh" ]] \
+        && grep -qF '_prepend_path "$HOME/.local/bin"' "${HOME}/.bash/exports.sh" 2>/dev/null; then
+        # The deployed exports.sh does add it — this shell simply predates the
+        # install.  That resolves itself in the next terminal, so it is advice,
+        # not a broken setup.  (Running doctor straight after setup.sh always
+        # lands here.)
+        warn "~/.local/bin is not on PATH in THIS shell" \
+             "exports.sh adds it — open a new terminal or: source ~/.bash/exports.sh"
     else
         fail "~/.local/bin is NOT on PATH" \
-             "exports.sh adds it — open a new terminal or: source ~/.bash/exports.sh"
+             "bash setup.sh --skip-tools   # deploy exports.sh, then open a new terminal"
     fi
 
-    # Check whether ~/.local/bin actually has our binaries
+    # Check whether ~/.local/bin actually has our binaries.  A missing one used
+    # to produce neither a pass nor a fail — the check went silent exactly when
+    # it mattered.  -e is false for a dangling symlink, so test -L as well.
     for bin in starship fzf zoxide; do
-        if [[ -f "${LOCAL_BIN}/${bin}" ]]; then
+        if [[ -e "${LOCAL_BIN}/${bin}" ]]; then
             pass "${LOCAL_BIN}/${bin} exists"
+        elif [[ -L "${LOCAL_BIN}/${bin}" ]]; then
+            fail "${LOCAL_BIN}/${bin} is a dangling symlink" \
+                 "bash setup.sh --force   # reinstall ${bin}"
+        else
+            warn "${LOCAL_BIN}/${bin} not found" \
+                 "bash setup.sh   # install ${bin} into ~/.local/bin"
         fi
     done
 }
@@ -176,6 +197,22 @@ check_path() {
 # Check: Tool binaries
 # ══════════════════════════════════════════════════════════════════════════════
 
+# _tool_missing NAME FIX — report a tool that `command -v` could not find.
+#
+# "Not on PATH" and "not installed" are different problems with different fixes.
+# When the binary is sitting in ~/.local/bin, the setup is fine and the shell is
+# simply older than the install — that is a warning with a one-line remedy, not
+# a failure.  Running doctor.sh immediately after setup.sh always hits this.
+_tool_missing() {
+    local name="$1" install_fix="$2"
+    if [[ -x "${LOCAL_BIN}/${name}" ]]; then
+        warn "${name} is installed but not on PATH in THIS shell" \
+             "open a new terminal, or: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    else
+        fail "${name} not found on PATH" "$install_fix"
+    fi
+}
+
 check_tools() {
     log_section "Tool binaries"
 
@@ -183,7 +220,7 @@ check_tools() {
     if command -v starship &>/dev/null; then
         pass "starship: $(starship --version 2>/dev/null | head -1)"
     else
-        fail "starship not found on PATH" \
+        _tool_missing starship \
              "bash setup.sh  (or: curl -sS https://starship.rs/install.sh | sh)"
     fi
 
@@ -204,7 +241,7 @@ check_tools() {
                  "Update: git -C ~/.fzf pull && ~/.fzf/install --all --no-bash --no-zsh --no-fish"
         fi
     else
-        fail "fzf not found on PATH" \
+        _tool_missing fzf \
              "bash setup.sh  (or: git clone https://github.com/junegunn/fzf ~/.fzf && ~/.fzf/install)"
     fi
 
@@ -212,7 +249,7 @@ check_tools() {
     if command -v zoxide &>/dev/null; then
         pass "zoxide: $(zoxide --version 2>/dev/null | head -1)"
     else
-        fail "zoxide not found on PATH" \
+        _tool_missing zoxide \
              "bash setup.sh  (or: curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh)"
     fi
 }
@@ -295,7 +332,10 @@ check_bash_completion() {
     if [[ -n "$found_at" ]]; then
         pass "bash-completion found: ${found_at}"
     else
-        fail "bash-completion not found" \
+        # A system package that needs root.  setup.sh skips it on machines where
+        # root is unavailable, so its absence is a degraded experience, not a
+        # broken install — everything else here works without it.
+        warn "bash-completion not found (optional — tab-completion will be limited)" \
              "Install with your package manager: sudo apt install bash-completion  /  brew install bash-completion@2"
     fi
 }
@@ -318,11 +358,15 @@ check_manifest() {
     local link_count
     # Use grep|wc -l (not grep -c) because grep -c exits 1 for zero matches,
     # and "|| echo 0" would then produce "0\n0" (grep's own output + echo's).
+    # shellcheck disable=SC2126  # deliberate, see above
     link_count="$(grep '^LINK=' "$MANIFEST_FILE" 2>/dev/null | wc -l | tr -d ' ')"
     info "${link_count} symlink(s) recorded in manifest"
 
     local repo_in_manifest
-    repo_in_manifest="$(grep '^REPO=' "$MANIFEST_FILE" 2>/dev/null | cut -d= -f2 || true)"
+    # Strip only the leading "REPO=" — cut -d= -f2 would truncate any repo path
+    # that itself contains an '=' and report a bogus mismatch.
+    repo_in_manifest="$(grep -m1 '^REPO=' "$MANIFEST_FILE" 2>/dev/null || true)"
+    repo_in_manifest="${repo_in_manifest#REPO=}"
     if [[ -n "$repo_in_manifest" && "$repo_in_manifest" != "$REPO_DIR" ]]; then
         warn "Manifest REPO (${repo_in_manifest}) does not match current script location (${REPO_DIR})" \
              "If you moved the repo, run: bash setup.sh --skip-tools  to update the manifest"
@@ -422,7 +466,7 @@ check_bashrc() {
     pass "~/.bashrc exists"
 
     # ── Managed blocks ────────────────────────────────────────────────────────
-    local head_ok=true tail_ok=true
+    local head_ok=true
 
     if grep -qF "$BLOCK_HEAD_BEGIN" "$bashrc" 2>/dev/null; then
         pass "HEAD block present (ble.sh + module sources)"
@@ -437,7 +481,6 @@ check_bashrc() {
     else
         fail "bash-customizations TAIL block missing from ~/.bashrc" \
              "bash setup.sh --skip-tools"
-        tail_ok=false
     fi
 
     # Cannot check load order if the blocks are missing
@@ -599,12 +642,14 @@ check_history() {
 print_summary() {
     echo
     echo "────────────────────────────────────────────────────────"
-    if [[ "$ISSUES" -eq 0 ]]; then
+    if [[ "$FAILURES" -eq 0 && "$WARNINGS" -eq 0 ]]; then
         echo -e "  ${GREEN}${BOLD}All checks passed.${RESET}  Setup looks healthy."
-    elif [[ "$ISSUES" -eq 1 ]]; then
-        echo -e "  ${YELLOW}${BOLD}1 issue found.${RESET}  See above for fix instructions."
+    elif [[ "$FAILURES" -eq 0 ]]; then
+        # Warnings are advisory by design — a healthy setup can carry them, so
+        # they must not turn into a red build for anyone scripting this.
+        echo -e "  ${GREEN}${BOLD}No failures.${RESET}  ${WARNINGS} warning(s) — advisory only, see the tips above."
     else
-        echo -e "  ${RED}${BOLD}${ISSUES} issues found.${RESET}  See above for fix instructions."
+        echo -e "  ${RED}${BOLD}${FAILURES} failure(s)${RESET}, ${WARNINGS} warning(s).  See the fix instructions above."
     fi
     echo
     echo "  Quick recovery commands:"
@@ -644,7 +689,9 @@ main() {
 
     print_summary
 
-    [[ "$ISSUES" -eq 0 ]]   # exit 0 if healthy, 1 if any issues
+    # Only failures decide the exit code.  doctor.sh is documented as safe to
+    # script against, so a best-practice warning must not report the setup broken.
+    [[ "$FAILURES" -eq 0 ]]
 }
 
 main "$@"
