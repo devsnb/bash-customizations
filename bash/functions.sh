@@ -40,34 +40,46 @@ extract() {
         return 1
     fi
 
+    # _need TOOL HINT — fail early with an accurate message when TOOL is absent.
+    # Chaining `command -v X && action || echo "needs X"` used to blame a missing
+    # tool whenever the extraction itself failed (corrupt archive, bad path).
+    _need() {
+        command -v "$1" &>/dev/null && return 0
+        echo "extract: '$2' requires '$1' ($3)" >&2
+        return 1
+    }
+
     case "$1" in
         *.tar.bz2|*.tbz2) tar xjf "$1"     ;;
         *.tar.gz|*.tgz)   tar xzf "$1"     ;;
         *.tar.xz|*.txz)   tar xJf "$1"     ;;
-        *.tar.zst) command -v unzstd &>/dev/null \
-                    && tar --use-compress-program=unzstd -xf "$1" \
-                    || { echo "extract: .tar.zst requires 'unzstd' (sudo apt install zstd)" >&2; return 1; } ;;
+        *.tar.zst)
+            _need unzstd "$1" "sudo apt install zstd" || return 1
+            tar --use-compress-program=unzstd -xf "$1" ;;
         *.tar)            tar xf  "$1"     ;;
+        # NOTE: bunzip2/gunzip/unxz replace the archive with its contents —
+        # unlike the .tar.* cases, the original file does not survive.
         *.bz2)            bunzip2 "$1"     ;;
         *.gz)             gunzip  "$1"     ;;
         *.xz)             unxz    "$1"     ;;
         *.zip)            unzip   "$1"     ;;
         # unrar is proprietary freeware — not installed by setup.sh.
         # Alternatives: unar (open-source) or 7z with rar support.
-        *.rar)  command -v unrar &>/dev/null \
-                    && unrar x "$1" \
-                    || { echo "extract: .rar requires 'unrar' (sudo apt install unrar)" >&2; return 1; } ;;
-        *.7z)   command -v 7z &>/dev/null \
-                    && 7z x "$1" \
-                    || { echo "extract: .7z requires '7z' (sudo apt install p7zip-full)" >&2; return 1; } ;;
-        *.Z)    command -v uncompress &>/dev/null \
-                    && uncompress "$1" \
-                    || { echo "extract: .Z requires 'uncompress' (sudo apt install ncompress)" >&2; return 1; } ;;
-        *.zst)  command -v unzstd &>/dev/null \
-                    && unzstd "$1" \
-                    || { echo "extract: .zst requires 'unzstd' (sudo apt install zstd)" >&2; return 1; } ;;
-        *)  echo "extract: '$1' — unknown or unsupported format" >&2; return 1 ;;
+        *.rar)
+            _need unrar "$1" "sudo apt install unrar" || return 1
+            unrar x "$1" ;;
+        *.7z)
+            _need 7z "$1" "sudo apt install p7zip-full" || return 1
+            7z x "$1" ;;
+        *.Z)
+            _need uncompress "$1" "sudo apt install ncompress" || return 1
+            uncompress "$1" ;;
+        *.zst)
+            _need unzstd "$1" "sudo apt install zstd" || return 1
+            unzstd "$1" ;;
+        *)  echo "extract: '$1' — unknown or unsupported format" >&2; unset -f _need; return 1 ;;
     esac
+    unset -f _need
 }
 
 # bak — create a dated backup copy of a file.
@@ -118,27 +130,56 @@ fcd() {
     # fzf exits 130 when the user cancels (Esc / Ctrl-C) — that is not an error.
     [[ $fzf_exit -eq 130 ]] && return 0
     [[ $fzf_exit -ne 0 ]]   && return 1
-    [[ -n "$dir" ]] && cd "$dir"
+    [[ -n "$dir" ]] && cd "$dir" || return 1
 }
 
-# fkill — interactively pick and kill a process.
+# fkill [-s SIGNAL] [filter] — interactively pick a process and kill it.
+#
+# The optional argument is a name filter, which is what you actually reach for
+# ("fkill node").  The signal moved behind -s: it used to be the first
+# positional argument, so the natural `fkill nginx` expanded to `kill -nginx`.
 fkill() {
     if ! command -v fzf &>/dev/null; then
         echo "fkill: fzf is not installed" >&2; return 1
     fi
-    local pid ps_cmd
-    # --no-headers is GNU procps (Linux); BSD ps (macOS) uses -h instead.
-    if [[ "$OSTYPE" == darwin* ]]; then
-        ps_cmd="ps -eo pid,ppid,comm -h"
-    else
-        ps_cmd="ps -eo pid,ppid,cmd --no-headers"
+
+    local signal=15
+    if [[ "${1:-}" == "-s" ]]; then
+        if [[ -z "${2:-}" ]]; then
+            echo "Usage: fkill [-s SIGNAL] [filter]" >&2; return 1
+        fi
+        signal="$2"; shift 2
     fi
-    pid=$(eval "$ps_cmd" \
-        | fzf --header="Select process to kill" \
+    local filter="${1:-}"
+
+    local -a ps_cmd
+    # --no-headers is GNU procps (Linux); BSD ps (macOS) uses -h instead.
+    # shellcheck disable=SC2054  # the commas belong to ps's -o format, they are
+    #                              not array element separators
+    if [[ "$OSTYPE" == darwin* ]]; then
+        ps_cmd=(ps -eo pid,ppid,comm -h)
+    else
+        ps_cmd=(ps -eo pid,ppid,cmd --no-headers)
+    fi
+
+    local selection pid
+    selection=$("${ps_cmd[@]}" \
+        | fzf --query="$filter" \
+              --header="Select a process to kill (signal ${signal})" \
               --preview="echo {}" \
         | awk '{print $1}'
     )
-    [[ -n "$pid" ]] && kill -"${1:-15}" "$pid" && echo "Sent signal ${1:-15} to PID $pid"
+    [[ -z "$selection" ]] && return 0
+
+    pid="$selection"
+    # Killing is irreversible and the list is one keystroke deep — confirm the
+    # actual target rather than trusting the highlight.
+    local name
+    name="$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")"
+    read -r -p "Send signal ${signal} to PID ${pid} (${name})? [y/N] " reply
+    [[ "${reply,,}" == "y" || "${reply,,}" == "yes" ]] || { echo "Cancelled."; return 0; }
+
+    kill -"$signal" "$pid" && echo "Sent signal ${signal} to PID ${pid} (${name})"
 }
 
 # ── Network ───────────────────────────────────────────────────────────────────
@@ -159,7 +200,11 @@ myip() {
             || ifconfig 2>/dev/null | awk '/inet /{print $2}' | grep -v '^127' | head -1 \
             || echo "(unavailable)"
     else
-        hostname -I 2>/dev/null | awk '{print $1}' || echo "(unavailable)"
+        # A pipeline's exit status is the LAST command's, so `cmd | awk || echo`
+        # never reached the fallback — capture first, then decide.
+        local local_ip
+        local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        echo "${local_ip:-(unavailable)}"
     fi
 }
 
