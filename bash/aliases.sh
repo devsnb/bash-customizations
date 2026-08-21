@@ -14,6 +14,10 @@ alias mkdir='mkdir -pv'
 
 # ── Directory listing ─────────────────────────────────────────────────────────
 # Prefer eza (modern ls replacement) if available; fall back to ls.
+#
+# shellcheck disable=SC2262,SC2263  # this file is SOURCED into an interactive
+# shell, not run as a script, so the aliases defined here do take effect for the
+# user's later commands; shellcheck's same-parsing-unit rule does not apply.
 if command -v eza &>/dev/null; then
     alias ls='eza --group-directories-first --icons=auto --color=auto'
     alias ll='eza -lah --group-directories-first --icons=auto --git'

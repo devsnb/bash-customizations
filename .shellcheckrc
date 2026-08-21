@@ -1,0 +1,19 @@
+# .shellcheckrc — repo-wide shellcheck configuration.
+#
+# Only genuine, repo-wide false positives are disabled here.  Anything that
+# applies to one line gets an inline `# shellcheck disable=` with its own
+# reason, so a real finding can never hide behind a blanket rule.
+
+# SC1091 — "Not following: <file> was not specified as input".
+# Every source in this repo is resolved at runtime against the user's $HOME
+# (~/.bash/*.sh, ~/.blerc, ble.sh), not against a path that exists at lint time.
+disable=SC1091
+
+# SC2088 — "Tilde does not expand in quotes. Use $HOME."
+# Correct in general, but every occurrence here is inside a log/echo message,
+# where "~/.bashrc" is the string we deliberately want the user to read.
+# Verified case by case; no code path relies on tilde expansion.
+disable=SC2088
+
+# Note: severity is NOT configurable here — shellcheck only honours it as a
+# command-line flag, so tests/lint.sh passes --severity=warning instead.
