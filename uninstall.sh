@@ -82,13 +82,15 @@ PURGED=false            # true once tool binaries were actually removed
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Palette, glyphs, log_* and has() are shared with setup.sh and doctor.sh.
-if [[ ! -f "${REPO_DIR}/lib/log.sh" ]]; then
-    echo "uninstall.sh: cannot find ${REPO_DIR}/lib/log.sh" >&2
+if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" ]]; then
+    echo "uninstall.sh: cannot find ${REPO_DIR}/lib/log.sh and lib/version.sh" >&2
     echo "              The repository looks incomplete — re-clone it and try again." >&2
     exit 1
 fi
 # shellcheck source=lib/log.sh
 source "${REPO_DIR}/lib/log.sh"
+# shellcheck source=lib/version.sh
+source "${REPO_DIR}/lib/version.sh"
 
 # run CMD… — execute unless this is a dry run.  Deliberately silent: every
 # mutation is announced by the report() call that follows it, in the caller's
@@ -149,6 +151,7 @@ parse_args() {
                 fi
                 ;;
             --delete-backup=*) DELETE_BACKUP="${arg#--delete-backup=}" ;;
+            -V|--version) print_version "uninstall.sh"; exit 0 ;;
             -h|--help)
                 echo "Usage: bash uninstall.sh [options]"
                 echo
@@ -162,6 +165,7 @@ parse_args() {
                 echo "  --list-backups          List available backups and exit"
                 echo "  --prune-backups[=N]     Delete all but the newest N backups (default ${PRUNE_KEEP_DEFAULT}) and exit"
                 echo "  --delete-backup=TS      Delete one backup by timestamp and exit"
+                echo "  -V, --version           Print the version and exit"
                 echo "  -h, --help              Show this help and exit"
                 echo
                 echo "Which backup --restore picks: the one recorded in the install"

@@ -62,13 +62,15 @@ WARNINGS=0           # incremented for every WARN — advisory, never fails the 
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Palette, glyphs, log_* and has() are shared with setup.sh and uninstall.sh.
-if [[ ! -f "${REPO_DIR}/lib/log.sh" ]]; then
-    echo "doctor.sh: cannot find ${REPO_DIR}/lib/log.sh" >&2
+if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" ]]; then
+    echo "doctor.sh: cannot find ${REPO_DIR}/lib/log.sh and lib/version.sh" >&2
     echo "           The repository looks incomplete — re-clone it and try again." >&2
     exit 1
 fi
 # shellcheck source=lib/log.sh
 source "${REPO_DIR}/lib/log.sh"
+# shellcheck source=lib/version.sh
+source "${REPO_DIR}/lib/version.sh"
 
 # doctor's sections group individual checks rather than whole phases of a run,
 # so they get the lighter rule.  log_section reads this at call time.
@@ -114,11 +116,13 @@ parse_args() {
     for arg in "$@"; do
         case "$arg" in
             --quiet|-q) QUIET=true ;;
+            -V|--version) print_version "doctor.sh"; exit 0 ;;
             -h|--help)
                 echo "Usage: bash doctor.sh [--quiet]"
                 echo
                 echo "Options:"
                 echo "  --quiet   Only print failures and warnings (suppress passing checks)"
+                echo "  -V, --version  Print the version and exit"
                 echo
                 echo "Exit codes: 0 = no failures (warnings are advisory), 1 = one or more failures"
                 echo

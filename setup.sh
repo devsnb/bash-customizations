@@ -74,13 +74,15 @@ FORCE=false
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Palette, glyphs, log_* and has() are shared with doctor.sh and uninstall.sh.
-if [[ ! -f "${REPO_DIR}/lib/log.sh" ]]; then
-    echo "setup.sh: cannot find ${REPO_DIR}/lib/log.sh" >&2
+if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" ]]; then
+    echo "setup.sh: cannot find ${REPO_DIR}/lib/log.sh and lib/version.sh" >&2
     echo "          The repository looks incomplete — re-clone it and try again." >&2
     exit 1
 fi
 # shellcheck source=lib/log.sh
 source "${REPO_DIR}/lib/log.sh"
+# shellcheck source=lib/version.sh
+source "${REPO_DIR}/lib/version.sh"
 
 # run CMD [args…] — execute or just print in dry-run mode.
 run() {
@@ -270,12 +272,14 @@ parse_args() {
             --dry-run)    DRY_RUN=true    ;;
             --skip-tools) SKIP_TOOLS=true ;;
             --force)      FORCE=true      ;;
+            -V|--version) print_version "setup.sh"; exit 0 ;;
             -h|--help)
                 echo "Usage: bash setup.sh [--dry-run] [--skip-tools] [--force]"
                 echo
                 echo "  --dry-run     Show what would happen without making changes"
                 echo "  --skip-tools  Deploy dotfiles only, skip tool installation"
                 echo "  --force       Overwrite existing installations"
+                echo "  -V, --version Print the version and exit"
                 echo
                 echo "Examples:"
                 echo "  bash setup.sh                        # first-time full install"

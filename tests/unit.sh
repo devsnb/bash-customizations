@@ -155,10 +155,26 @@ assert_contains "$out" "alias ll=" "aliases.sh defines ll on this host"
 suite "script argument handling"
 # ══════════════════════════════════════════════════════════════════════════════
 
+repo_version="$(head -n1 "${REPO_DIR}/VERSION")"
+
 for script in setup.sh doctor.sh uninstall.sh; do
     assert_exit 0 "${script} --help exits 0" bash "${REPO_DIR}/${script}" --help
     assert_exit 1 "${script} rejects an unknown flag" bash "${REPO_DIR}/${script}" --nope
+    assert_exit 0 "${script} --version exits 0" bash "${REPO_DIR}/${script}" --version
+    assert_contains "$(bash "${REPO_DIR}/${script}" --version 2>&1)" \
+        "bash-customizations ${repo_version}" "${script} --version reports the repo version"
+    assert_contains "$(bash "${REPO_DIR}/${script}" --help 2>&1)" \
+        "--version" "${script} --help documents --version"
 done
+
+# Everything downstream does `cat VERSION`; a stray second line would poison the
+# tag comparison in CI with an error nobody could read.
+assert_eq "1" "$(wc -l < "${REPO_DIR}/VERSION" | tr -d ' ')" \
+    "VERSION is exactly one newline-terminated line"
+
+semver=no
+if [[ "$repo_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then semver=yes; fi
+assert_eq "yes" "$semver" "VERSION is strict semver with no leading v (${repo_version})"
 
 out=$(bash "${REPO_DIR}/doctor.sh" --help 2>&1)
 assert_contains "$out" "warnings are advisory" "doctor --help documents its exit codes"
