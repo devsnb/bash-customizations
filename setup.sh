@@ -925,6 +925,9 @@ write_manifest() {
         echo "# Written by setup.sh on $(date '+%Y-%m-%d %T')"
         echo "# Do not edit by hand — used by uninstall.sh and doctor.sh"
         echo "REPO=${REPO_DIR}"
+        # Which release deployed these files.  doctor.sh compares it against
+        # the repo's VERSION so a machine can say what it is running.
+        echo "VERSION=${BC_VERSION}"
         if $BACKUP_CREATED; then
             echo "BACKUP=${BACKUP_DIR}"
         else

@@ -10,7 +10,7 @@
 #   3.  Tool binaries: starship, fzf, zoxide
 #   4.  ble.sh installation
 #   5.  bash-completion availability
-#   6.  Manifest exists and is readable
+#   6.  Manifest exists, is readable, and records the installed version
 #   7.  Every managed symlink: exists, is a symlink, points into the repo,
 #       and the repo source file is present (not dangling)
 #   8.  .bashrc structure:
@@ -132,7 +132,7 @@ parse_args() {
                 echo "   3  starship / fzf / zoxide binaries present and functional"
                 echo "   4  ble.sh installed"
                 echo "   5  bash-completion available"
-                echo "   6  Install manifest exists and matches this repo"
+                echo "   6  Install manifest exists, matches this repo and records its version"
                 echo "   7  All managed symlinks valid (not dangling, point into repo)"
                 echo "   8  .bashrc structure: load order, all modules sourced, ble-attach last"
                 echo "   9  .blerc contains fzf integration blocks"
@@ -386,6 +386,28 @@ check_manifest() {
     if [[ -n "$repo_in_manifest" && "$repo_in_manifest" != "$REPO_DIR" ]]; then
         warn "Manifest REPO (${repo_in_manifest}) does not match current script location (${REPO_DIR})" \
              "If you moved the repo, run: bash setup.sh --skip-tools  to update the manifest"
+    fi
+
+    # Which release is actually deployed.  This lives inside the manifest check
+    # rather than becoming a 13th check, because that is where the answer is
+    # recorded — and because the check list is a documented contract.
+    local installed_version
+    installed_version="$(grep -m1 '^VERSION=' "$MANIFEST_FILE" 2>/dev/null || true)"
+    installed_version="${installed_version#VERSION=}"
+
+    if [[ "$BC_VERSION" == "unknown" ]]; then
+        info "This checkout has no VERSION file — nothing to compare the install against"
+    elif [[ -z "$installed_version" ]]; then
+        # The ordinary upgrade case: a manifest written before versioning
+        # existed has no VERSION= key at all.  The install is fine; it simply
+        # predates the record, so this is information, not a warning.
+        info "Installed version not recorded (manifest predates versioning) — repo is at v${BC_VERSION}"
+        info "The next 'bash setup.sh --skip-tools' will record it"
+    elif [[ "$installed_version" == "$BC_VERSION" ]]; then
+        pass "Installed v${installed_version} matches this repo"
+    else
+        warn "Installed v${installed_version}, but this repo is at v${BC_VERSION}" \
+             "Re-deploy the newer files: make update   (dotfiles only: make dotfiles)"
     fi
 }
 
