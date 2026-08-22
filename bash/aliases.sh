@@ -46,16 +46,6 @@ alias ....='cd ../../..'
 alias ~='cd ~'
 alias -- -='cd -'    # cd to previous directory
 
-# ── File viewing ──────────────────────────────────────────────────────────────
-# Prefer bat (syntax-highlighted cat) when available.
-if command -v bat &>/dev/null; then
-    alias cat='bat --paging=never'
-    alias less='bat --paging=always'
-elif command -v batcat &>/dev/null; then   # Debian/Ubuntu package name
-    alias cat='batcat --paging=never'
-    alias less='batcat --paging=always'
-fi
-
 # ── Grep ──────────────────────────────────────────────────────────────────────
 alias grep='grep --color=auto'
 alias fgrep='fgrep --color=auto'
@@ -64,8 +54,8 @@ alias egrep='egrep --color=auto'
 # ── Disk usage ────────────────────────────────────────────────────────────────
 alias df='df -h'
 alias du='du -h'
-alias dud='du -d1 -h'    # disk usage of immediate subdirectories
-alias duf='du -sh *'     # disk usage of files in current dir
+alias du-dirs='du -d1 -h'    # disk usage of immediate subdirectories
+alias du-files='du -sh *'     # disk usage of files in current dir
 
 # ── Processes ─────────────────────────────────────────────────────────────────
 alias psa='ps auxf'
@@ -76,8 +66,9 @@ alias ping='ping -c 5'
 alias ports='ss -tulpn'
 
 # ── Editor ────────────────────────────────────────────────────────────────────
+# No `vi` alias here on purpose: it shadows /usr/bin/vi, so `vi file` would open
+# nano.  `v` is ours to define — nothing on a stock system is called that.
 alias v='${EDITOR:-nano}'
-alias vi='${EDITOR:-nano}'
 
 # ── Git ───────────────────────────────────────────────────────────────────────
 alias g='git'
@@ -126,4 +117,4 @@ alias cls='printf "\033c"'
 
 # ── Reload / edit config ──────────────────────────────────────────────────────
 alias bashrc='${EDITOR:-nano} ~/.bashrc'
-alias aliases='${EDITOR:-nano} ~/.bash/aliases.sh'
+alias edit-aliases='${EDITOR:-nano} ~/.bash/aliases.sh'

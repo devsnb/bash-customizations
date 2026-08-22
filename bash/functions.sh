@@ -82,9 +82,9 @@ extract() {
     unset -f _need
 }
 
-# bak — create a dated backup copy of a file.
-bak() {
-    [[ $# -ne 1 ]] && { echo "Usage: bak <file>" >&2; return 1; }
+# backup-file — create a dated backup copy of a file.
+backup-file() {
+    [[ $# -ne 1 ]] && { echo "Usage: backup-file <file>" >&2; return 1; }
     cp -v -- "$1" "${1}.bak.$(date +%Y%m%d_%H%M%S)"
 }
 
@@ -104,10 +104,10 @@ port() {
 
 # ── Text / search ─────────────────────────────────────────────────────────────
 
-# find-in — recursive grep with a cleaner interface.
-# Usage: find-in <pattern> [path]
-find-in() {
-    local pattern="${1:?Usage: find-in <pattern> [path]}"
+# grep-in — recursive grep with a cleaner interface.
+# Usage: grep-in <pattern> [path]
+grep-in() {
+    local pattern="${1:?Usage: grep-in <pattern> [path]}"
     local search_path="${2:-.}"
     grep -rn --color=auto "$pattern" "$search_path"
 }
@@ -233,12 +233,12 @@ reload() {
     source "${HOME}/.bashrc" && echo "~/.bashrc reloaded."
 }
 
-# tre — tree with hidden files, colours, and pager.
-tre() {
+# tree-all — tree with hidden files, colours, and pager.
+tree-all() {
     if command -v tree &>/dev/null; then
         tree -aC -I '.git|node_modules|__pycache__|.venv' --dirsfirst "$@" | less -FRX
     else
-        echo "tre: 'tree' is not installed" >&2; return 1
+        echo "tree-all: 'tree' is not installed" >&2; return 1
     fi
 }
 
