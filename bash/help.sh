@@ -115,6 +115,9 @@ cheatsheet() {
     # places it is used: ~/.bash when deployed, <repo>/bash when sourced by
     # tools/gen-docs.sh.  No configuration, no globals.
     local dir="${BASH_SOURCE[0]%/*}" f
+    # `source help.sh` with no slash leaves the strip a no-op; then the siblings
+    # are in the current directory.
+    [[ "$dir" == "${BASH_SOURCE[0]}" ]] && dir='.'
     for f in aliases functions; do
         if [[ ! -r "${dir}/${f}.sh" ]]; then
             echo "cheatsheet: cannot read ${dir}/${f}.sh" >&2
@@ -133,9 +136,10 @@ cheatsheet() {
     # when it actually is not — on a machine that has docker, "(needs docker)"
     # on eleven rows is noise, and on a machine that does not, it is the answer
     # to why the command you just read about does nothing.
-    for tool in $(printf '%s\n' "$records" | awk -F '\t' '$5 != "" { print $5 }' | sort -u); do
+    while IFS= read -r tool; do
+        [[ -n "$tool" ]] || continue
         command -v "$tool" &>/dev/null || missing="${missing}${tool},"
-    done
+    done < <(printf '%s\n' "$records" | awk -F '\t' '$5 != "" { print $5 }' | sort -u)
 
     printf '%s\n' "$records" \
     | awk -F '\t' -v q="${1-}" -v dim="$dim" -v bold="$bold" -v rst="$reset" -v missing="$missing" '
