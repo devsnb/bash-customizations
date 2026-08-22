@@ -176,6 +176,25 @@ semver=no
 if [[ "$repo_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then semver=yes; fi
 assert_eq "yes" "$semver" "VERSION is strict semver with no leading v (${repo_version})"
 
+# One number in three places that can drift: the VERSION file, the newest
+# CHANGELOG heading, and the git tag.
+newest_entry="$(awk '/^## \[/ && !/^## \[Unreleased\]/ {
+                       sub(/^## \[/, ""); sub(/\].*/, ""); print; exit }' "${REPO_DIR}/CHANGELOG.md")"
+assert_eq "$repo_version" "$newest_entry" "the newest CHANGELOG release heading matches VERSION"
+
+# The structure tools/release.sh rewrites; losing either turns cutting a release
+# into a manual edit at exactly the wrong moment.
+assert_file_contains "${REPO_DIR}/CHANGELOG.md" "## [Unreleased]" \
+    "CHANGELOG keeps an Unreleased section"
+assert_file_contains "${REPO_DIR}/CHANGELOG.md" "[Unreleased]:" \
+    "CHANGELOG keeps the Unreleased link reference"
+
+# A shallow clone or a tarball has no tags; only check when there are some.
+if [[ -n "$(git -C "$REPO_DIR" tag --list 'v*' 2>/dev/null)" ]]; then
+    nearest_tag="$(git -C "$REPO_DIR" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+    assert_eq "v${repo_version}" "$nearest_tag" "the newest reachable git tag matches VERSION"
+fi
+
 out=$(bash "${REPO_DIR}/doctor.sh" --help 2>&1)
 assert_contains "$out" "warnings are advisory" "doctor --help documents its exit codes"
 assert_contains "$out" "  12  " "doctor --help lists all 12 checks"
