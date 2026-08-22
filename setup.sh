@@ -212,11 +212,22 @@ deploy_dir() {
 }
 
 # download URL — print the raw content of a URL using curl or wget.
+#
+# Progress goes to stderr so the payload on stdout stays clean for the callers
+# that pipe it into tar or sh.  Without it the multi-megabyte ble.sh fetch looks
+# exactly like a hang.  The connect timeout turns an unreachable host into a
+# quick, clear failure instead of a two-minute stall.
+# Pass -q for small metadata requests where a progress bar is just noise.
 download() {
+    local quiet=false
+    if [[ "${1:-}" == "-q" ]]; then quiet=true; shift; fi
+
     if has curl; then
-        curl -fsSL "$1"
+        if $quiet; then curl -fsSL --connect-timeout 15 "$1"
+        else            curl -fL   --connect-timeout 15 --progress-bar "$1"; fi
     elif has wget; then
-        wget -qO- "$1"
+        if $quiet; then wget --connect-timeout=15 -qO- "$1"
+        else            wget --connect-timeout=15 --show-progress -qO- "$1"; fi
     else
         log_error "Neither curl nor wget found — cannot download."
         return 1
@@ -328,6 +339,13 @@ check_prerequisites() {
         log_info "Prepending $LOCAL_BIN to PATH so managed tools take precedence."
         export PATH="${LOCAL_BIN}:${PATH}"
     fi
+
+    # Said here rather than only in the closing summary: the prompt renders its
+    # icons as tofu without a Nerd Font, and installing one afterwards means
+    # looking at a broken prompt in between.
+    log_info "The Starship prompt needs a Nerd Font to draw its icons."
+    log_info "  Download one now if you have not: https://www.nerdfonts.com/font-downloads"
+    log_info "  then set it as your terminal's font."
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -525,7 +543,7 @@ install_fzf() {
                 return 1
                 ;;
         esac
-        fzf_ver="$(download "https://api.github.com/repos/junegunn/fzf/releases/latest" \
+        fzf_ver="$(download -q "https://api.github.com/repos/junegunn/fzf/releases/latest" \
                    | grep '"tag_name"' \
                    | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" || fzf_ver=""
         if [[ -z "$fzf_ver" ]]; then
@@ -911,9 +929,21 @@ verify() {
         fi
     done
 
-    for f in "${BASH_DIR}"/*.sh; do
-        if [[ -e "$f" ]]; then log_ok "Deployed: $f"; fi
+    # deploy_file already named every file as it linked it, so re-listing all
+    # nine here just doubled the output.  What was never reported is the case
+    # that matters: a module the repo has and $HOME does not.
+    local missing_modules=() src module_count=0
+    for src in "${REPO_DIR}"/bash/*.sh; do
+        [[ -e "$src" ]] || continue
+        (( module_count++ )) || true
+        [[ -e "${BASH_DIR}/$(basename "$src")" ]] || missing_modules+=("$(basename "$src")")
     done
+    if [[ ${#missing_modules[@]} -eq 0 ]]; then
+        log_ok "Modules: ${module_count} deployed to ${BASH_DIR}"
+    else
+        log_warn "Modules: ${#missing_modules[@]} of ${module_count} missing — ${missing_modules[*]}"
+        all_ok=false
+    fi
 
     # Manifest
     if [[ -f "${MANIFEST_FILE}" ]]; then
@@ -962,15 +992,20 @@ print_done() {
     fi
     echo
     echo "  Next steps:"
-    echo "  1. Open a new terminal  (or: source ~/.bashrc)"
-    echo "  2. Install a Nerd Font for Starship icons: https://www.nerdfonts.com/"
-    echo "  3. Set your terminal to use the Nerd Font"
+    echo "  1. Open a new terminal."
+    echo "     None of this is active in THIS shell — the config is read when a"
+    echo "     shell starts, and yours started before it existed."
+    echo "     (Or run: source ~/.bashrc)"
+    echo "  2. Set your terminal's font to a Nerd Font, or the prompt icons will"
+    echo "     show as empty boxes: https://www.nerdfonts.com/font-downloads"
     if $BACKUP_CREATED; then
-        echo "  4. Your old dotfiles were backed up to: ${BACKUP_DIR}"
+        echo "  3. Your old dotfiles were backed up to: ${BACKUP_DIR}"
         echo "     To restore them: bash uninstall.sh --restore"
     fi
     echo
     echo "  Useful commands after setup:"
+    echo "    cheatsheet     — every alias and function this added, with descriptions"
+    echo "    cheatsheet git — the same list, filtered"
     echo "    z <dir>        — jump to directory (zoxide)"
     echo "    zi             — interactive directory jump (zoxide + fzf)"
     echo "    CTRL-R         — fuzzy history search (fzf / ble.sh)"
