@@ -32,7 +32,7 @@ Once installed, run **`cheatsheet`** in your shell to see everything it added.
 - [Load order](#load-order) · [ble.sh + fzf: the keymap split](#blesh--fzf-the-keymap-split)
 - [Module reference](#module-reference) — the full alias and function tables
 - [Customisation](#customisation) · [Adding a new module](#adding-a-new-module) · [Updating tools](#updating-tools)
-- [Testing](#testing) · [Contributing](#contributing)
+- [Testing](#testing) · [Releases](#releases) · [Contributing](#contributing)
 
 ---
 
@@ -154,6 +154,8 @@ Run `make` (or `make help`) to see all available targets:
 | `make test-docker` | The full install → doctor → uninstall → restore round trip |
 | `make test` | Unit tests + the container round trip |
 | `make check` | Lint, docs, and test — what CI runs |
+| `make release-dry` | Preview cutting a release — `VERSION=X.Y.Z` |
+| `make release` | Cut a release locally: stamp, changelog, commit, tag |
 
 You can also invoke the scripts directly if you prefer:
 
@@ -167,6 +169,7 @@ You can also invoke the scripts directly if you prefer:
 | `--dry-run` | Show what would happen, change nothing |
 | `--skip-tools` | Deploy dotfiles only (tools already installed) |
 | `--force` | Re-install tools even if already present |
+| `-V`, `--version` | Print the version and exit |
 | `-h`, `--help` | Print usage, examples, and recovery hints, then exit |
 
 **`uninstall.sh`**
@@ -183,6 +186,7 @@ You can also invoke the scripts directly if you prefer:
 | `--list-backups` | List available backups and exit |
 | `--prune-backups[=N]` | Delete all but the newest N backups (default 5) and exit |
 | `--delete-backup=TS` | Delete one backup and exit |
+| `-V`, `--version` | Print the version and exit |
 | `-h`, `--help` | Print usage and exit |
 
 **`doctor.sh`**
@@ -191,6 +195,7 @@ You can also invoke the scripts directly if you prefer:
 |---|---|
 | *(none)* | Run every check and print the results |
 | `-q`, `--quiet` | Print only failures and warnings |
+| `-V`, `--version` | Print the version and exit |
 | `-h`, `--help` | Print usage, the check list, and exit codes |
 
 To move to the newest release, run `make update` — it fetches, then re-installs. To upgrade only the installed tools without changing release, use `make update-tools` (or `bash setup.sh --force`). See [Updating tools](#updating-tools).
@@ -752,13 +757,72 @@ useful without it. CI runs all three environments on every push and pull request
 
 ---
 
+## Releases
+
+Every release is a git tag (`v1.2.0`), a section in
+[`CHANGELOG.md`](CHANGELOG.md), and a
+[GitHub Release](https://github.com/devsnb/bash-customizations/releases) whose
+body is that section. The `VERSION` file is the single source of truth; the tag
+mirrors it, and `setup.sh` records it in the install manifest so a machine can
+say which release deployed its dotfiles:
+
+```sh
+make version        # this checkout, and what is installed
+bash doctor.sh      # warns when the installed version is behind
+```
+
+### What the numbers mean here
+
+This is a shell configuration, so the public surface is the names you type and
+the flags the scripts accept — not an API:
+
+| Bump | When |
+|---|---|
+| **major** | An alias or function was renamed or removed, or a script flag changed. Your muscle memory needs updating; read the changelog. |
+| **minor** | New aliases, functions, flags or modules. Nothing you already type stops working. |
+| **patch** | Fixes only. |
+
+Upgrading is safe by design: the managed `~/.bashrc` block is replaced wholesale
+rather than patched, `~/.bashrc` is backed up first whenever that block actually
+changes, and a module dropped by a release has its symlink pruned instead of
+being left dangling.
+
+### Installing a specific release
+
+```sh
+git clone https://github.com/devsnb/bash-customizations.git
+cd bash-customizations
+git checkout v1.0.0
+make install
+```
+
+### Cutting one
+
+```sh
+make release-dry VERSION=1.1.0        # every check, plus the exact diff — writes nothing
+make release VERSION=1.1.0            # stamps VERSION, folds Unreleased into a dated
+                                      # heading, commits, and annotates the tag
+git push --follow-tags origin main    # the only irreversible step
+```
+
+`make release` refuses on a dirty tree, a branch other than `main`, a version
+that is not newer, an existing tag, an empty `Unreleased` section, or a failing
+`make check` — and it never pushes. The push is what starts CI's release job,
+which runs the full suite against the tag, checks the tag matches `VERSION`, and
+only then publishes the GitHub Release.
+
+---
+
 ## Contributing
 
 1. Fork the repository and create a branch.
 2. Edit files in `bash/` or the root scripts.
 3. Run `make check` — lint, unit tests, and the container round trip.
 4. Add or update inline comments for any behaviour that isn't obvious.
-5. Open a pull request — describe what changed and why.
+5. Add a line to the `## [Unreleased]` section of [`CHANGELOG.md`](CHANGELOG.md)
+   describing the change as a *user* would experience it. Mark anything that
+   renames or removes an alias, function or flag as **BREAKING**.
+6. Open a pull request — describe what changed and why.
 
 Code style:
 - All bash files must pass `bash -n <file>` and `shellcheck --severity=warning`.
@@ -772,3 +836,9 @@ Code style:
   table to edit by hand.
 - Aliases must be single-line and must not contain a `#` or a backtick in their
   expansion; the tests enforce both.
+- Never edit `VERSION` or the release headings in `CHANGELOG.md` by hand —
+  `tools/release.sh` writes both, and the tests fail if they disagree with the
+  newest tag.
+- Adding or removing a module under `bash/` means updating the reference
+  `.bashrc`, `_gen_head_block()` in `setup.sh`, and the fallback lists in
+  `doctor.sh` and `uninstall.sh`. A test compares all of them.
