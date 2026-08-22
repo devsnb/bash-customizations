@@ -128,7 +128,49 @@ fi
 assert_exit 0 "doctor.sh still healthy after re-running" bash "${REPO_DIR}/doctor.sh"
 
 # ══════════════════════════════════════════════════════════════════════════════
-suite "4. --dry-run changes nothing"
+suite "4. upgrading is safe"
+# ══════════════════════════════════════════════════════════════════════════════
+
+# A release that drops a module must not strand its symlink.  The rewritten
+# manifest no longer lists it, so from that moment neither uninstall.sh nor
+# doctor.sh can see it — it would outlive a full uninstall.
+#
+# The repo is mounted read-only here, so rather than deleting a real module we
+# forge exactly what one leaves behind: a link into the repo whose source is gone.
+ln -sf "${REPO_DIR}/bash/zz-was-removed.sh" "$HOME/.bash/zz-was-removed.sh"
+
+# Two things that must survive: a file the user put there themselves, and a link
+# pointing somewhere we do not own.
+printf '# my own module\n' > "$HOME/.bash/mine.sh"
+ln -sf /etc/hostname "$HOME/.bash/elsewhere.sh"
+
+bash "${REPO_DIR}/setup.sh" --skip-tools >/dev/null 2>&1
+assert_absent "$HOME/.bash/zz-was-removed.sh" "a link whose repo source is gone is pruned"
+assert_exists "$HOME/.bash/mine.sh"      "a user's own file in ~/.bash is left alone"
+assert_exists "$HOME/.bash/elsewhere.sh" "a link pointing outside the repo is left alone"
+rm -f "$HOME/.bash/mine.sh" "$HOME/.bash/elsewhere.sh"
+
+# Rewriting the managed block must leave a way back to the previous release.
+# Backing up on first touch only meant an upgrade that broke your prompt could
+# only be undone all the way to your pre-install state.
+backups_before=$(backup_count)
+manifest_backup_before=$(grep -m1 '^BACKUP=' "$HOME/.local/share/bash-customizations/manifest")
+bash "${REPO_DIR}/setup.sh" --skip-tools >/dev/null 2>&1
+assert_eq "$backups_before" "$(backup_count)" "an unchanged block still creates no backup"
+
+sed -i 's|_src "$HOME/.bash/help.sh"|# as if this release had no help.sh|' "$HOME/.bashrc"
+bash "${REPO_DIR}/setup.sh" --skip-tools >/dev/null 2>&1
+assert_eq "$(( backups_before + 1 ))" "$(backup_count)" \
+    "a changed block is backed up before it is rewritten"
+# The upgrade snapshot must NOT become what --restore resolves to: that pointer
+# belongs to the pre-install backup, or restore stops undoing the install.
+assert_eq "$manifest_backup_before" \
+    "$(grep -m1 '^BACKUP=' "$HOME/.local/share/bash-customizations/manifest")" \
+    "…without stealing the manifest's pre-install backup pointer"
+assert_file_contains "$HOME/.bashrc" '_src "$HOME/.bash/help.sh"' "…and the block is restored"
+
+# ══════════════════════════════════════════════════════════════════════════════
+suite "5. --dry-run changes nothing"
 # ══════════════════════════════════════════════════════════════════════════════
 
 hash_before=$(home_hash)
@@ -147,7 +189,7 @@ assert_not_contains "$dry_out" "[OK]    Removed" "uninstall --dry-run never clai
 assert_not_contains "$dry_out" $'\033' "uninstall --dry-run emits no colour when piped"
 
 # ══════════════════════════════════════════════════════════════════════════════
-suite "5. refusing to act without a way to confirm"
+suite "6. refusing to act without a way to confirm"
 # ══════════════════════════════════════════════════════════════════════════════
 
 # No TTY and no --yes: the tool must fail loudly rather than print "Aborted."
@@ -158,7 +200,7 @@ assert_eq "1" "$notty_rc" "uninstall without a TTY and without --yes exits 1"
 assert_eq "$hash_before" "$(home_hash)" "…and changes nothing"
 
 # ══════════════════════════════════════════════════════════════════════════════
-suite "6. a mistyped backup timestamp is caught before anything is touched"
+suite "7. a mistyped backup timestamp is caught before anything is touched"
 # ══════════════════════════════════════════════════════════════════════════════
 
 bad_rc=0
@@ -168,7 +210,7 @@ assert_eq "$hash_before" "$(home_hash)" "…with the install left completely int
 assert_exit 0 "doctor.sh confirms the setup is still healthy" bash "${REPO_DIR}/doctor.sh"
 
 # ══════════════════════════════════════════════════════════════════════════════
-suite "7. restore brings back the original ~/.bashrc"
+suite "8. restore brings back the original ~/.bashrc"
 # ══════════════════════════════════════════════════════════════════════════════
 
 restore_out=$(bash "${REPO_DIR}/uninstall.sh" --restore --yes 2>&1); restore_rc=$?
@@ -192,7 +234,7 @@ assert_absent "$HOME/.config/starship.toml" "starship.toml symlink is gone"
 assert_exit 1 "doctor.sh now reports the setup as absent" bash "${REPO_DIR}/doctor.sh"
 
 # ══════════════════════════════════════════════════════════════════════════════
-suite "8. plain uninstall (no restore) removes every trace"
+suite "9. plain uninstall (no restore) removes every trace"
 # ══════════════════════════════════════════════════════════════════════════════
 
 assert_exit 0 "re-install for the final case" bash "${REPO_DIR}/setup.sh" --skip-tools
@@ -211,7 +253,7 @@ assert_file_contains "$HOME/.bashrc" "$ORIGINAL_BASHRC_MARKER" \
     "the user's own .bashrc content survives a plain uninstall"
 
 # ══════════════════════════════════════════════════════════════════════════════
-suite "9. backup housekeeping"
+suite "10. backup housekeeping"
 # ══════════════════════════════════════════════════════════════════════════════
 
 list_out=$(bash "${REPO_DIR}/uninstall.sh" --list-backups 2>&1)

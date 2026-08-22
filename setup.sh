@@ -209,6 +209,32 @@ deploy_dir() {
         [[ -f "$src_file" ]] || continue
         deploy_file "$src_file" "${dest_dir}/$(basename "$src_file")"
     done
+    prune_orphaned_links "$dest_dir"
+}
+
+# prune_orphaned_links DEST_DIR — drop links we own whose source no longer exists.
+#
+# A release that deletes bash/foo.sh would otherwise strand ~/.bash/foo.sh as a
+# dangling symlink: it disappears from the rewritten manifest, so neither
+# uninstall.sh nor doctor.sh can see it any more, and it survives even a full
+# uninstall.  Only links resolving into this repo are touched — whatever else a
+# user has put in ~/.bash is theirs.
+prune_orphaned_links() {
+    local dest_dir="$1" link target
+    for link in "$dest_dir"/*.sh; do
+        [[ -L "$link" ]] || continue
+        target="$(readlink "$link" 2>/dev/null || true)"
+        # Not ours: leave it strictly alone.
+        if [[ "$target" != "${REPO_DIR}/"* ]]; then continue; fi
+        # Source still present: nothing to do.
+        if [[ -f "$target" ]]; then continue; fi
+        if $DRY_RUN; then
+            log_dry "Would remove orphaned link (source no longer in the repo): $link"
+        else
+            rm -f "$link"
+            log_ok "Removed orphaned link (source no longer in the repo): $link"
+        fi
+    done
 }
 
 # download URL — print the raw content of a URL using curl or wget.
@@ -637,6 +663,47 @@ CONTENT
     echo "$BLOCK_TAIL_END"
 }
 
+# _backup_before_upgrade FILE — snapshot FILE before rewriting its managed block.
+#
+# Deliberately NOT backup_if_exists: that marks BACKUP_CREATED, which makes
+# write_manifest point BACKUP= at this run's directory.  The manifest's BACKUP=
+# is what --restore resolves to, and it must keep pointing at the pre-install
+# snapshot — the one that returns the user to the state they had before any of
+# this existed.  An upgrade snapshot is a different thing and gets its own
+# directory, mirroring uninstall.sh's -pre-restore convention.
+_backup_before_upgrade() {
+    local file="$1" dir
+    dir="${HOME}/.bash_backup/$(date +%Y%m%d_%H%M%S)-pre-upgrade"
+    if $DRY_RUN; then
+        log_dry "Back up $file ${GLYPH_ARROW} ${dir}/.bashrc  (managed block changed)"
+        return 0
+    fi
+    log_info "The managed block differs from this version — saving ${file} to ${dir} first."
+    mkdir -p "$dir"
+    cp -a "$file" "${dir}/.bashrc"
+}
+
+# _extract_block FILE BEGIN END — print one managed block, markers included.
+_extract_block() {
+    awk -v b="$2" -v e="$3" '
+        $0 == b { inb = 1 }
+        inb     { print }
+        $0 == e { inb = 0 }
+    ' "$1" 2>/dev/null || true
+}
+
+# _blocks_are_current FILE — true when FILE's managed blocks are byte-identical
+# to what this version of setup.sh would write.  Used to decide whether an
+# upgrade needs a fresh backup before rewriting them.
+_blocks_are_current() {
+    local file="$1" current expected
+    current="$(_extract_block "$file" "$BLOCK_HEAD_BEGIN" "$BLOCK_HEAD_END"
+               _extract_block "$file" "$BLOCK_TAIL_BEGIN" "$BLOCK_TAIL_END")"
+    expected="$(_gen_head_block
+                _gen_tail_block)"
+    [[ "$current" == "$expected" ]]
+}
+
 # _rewrite_block FILE BEGIN END NEW_BLOCK_FILE
 # Replace the old block (between BEGIN and END inclusive) with NEW_BLOCK_FILE.
 # NEW_BLOCK_FILE must include the begin/end marker lines.
@@ -735,9 +802,18 @@ inject_bashrc() {
         fi
     fi
 
-    # Back up on first touch only (before our blocks exist in the file)
+    # Back up whenever this run is about to change the file: either our blocks
+    # are not there yet (first install), or they are there but differ from what
+    # this version generates (an upgrade).
+    #
+    # Backing up only on first touch was not enough.  _rewrite_block replaces
+    # the managed block wholesale, so an upgrade whose new block breaks the
+    # prompt left no way back to the previous release — --restore would jump the
+    # user all the way to their pre-install state.
     if ! grep -qF "$BLOCK_HEAD_BEGIN" "$bashrc" 2>/dev/null; then
         backup_if_exists "$bashrc"
+    elif ! _blocks_are_current "$bashrc"; then
+        _backup_before_upgrade "$bashrc"
     fi
 
     if $DRY_RUN; then
