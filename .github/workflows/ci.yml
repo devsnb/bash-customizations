@@ -18,7 +18,7 @@ jobs:
     name: lint (shellcheck + bash -n)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       - name: Lint
@@ -30,7 +30,7 @@ jobs:
     name: unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run unit tests
         run: make test-unit
 
@@ -47,6 +47,6 @@ jobs:
           - user-nosudo   # ordinary user, no sudo installed
           - root-nosudo   # root, no sudo installed (the container case)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install → doctor → uninstall → restore
         run: bash tests/docker.sh ${{ matrix.environment }}
