@@ -189,6 +189,26 @@ assert_file_contains "${REPO_DIR}/CHANGELOG.md" "## [Unreleased]" \
 assert_file_contains "${REPO_DIR}/CHANGELOG.md" "[Unreleased]:" \
     "CHANGELOG keeps the Unreleased link reference"
 
+# The extractor the CI release job publishes with.
+assert_contains "$(bash "${REPO_DIR}/tools/release.sh" --notes "$repo_version")" "###" \
+    "release.sh --notes prints the newest section's body"
+assert_exit 1 "release.sh --notes fails for a version the CHANGELOG lacks" \
+    bash "${REPO_DIR}/tools/release.sh" --notes 99.99.99
+
+# Argument validation runs before any git or make work, so these are instant and
+# indifferent to whether the working tree is clean.  The full --dry-run is
+# deliberately not tested here: it demands a clean tree on main, which someone
+# running `make test-unit` mid-change does not have.
+assert_exit 0 "release.sh --help exits 0" bash "${REPO_DIR}/tools/release.sh" --help
+assert_exit 1 "release.sh refuses a version that is not semver" \
+    bash "${REPO_DIR}/tools/release.sh" 1.2
+assert_exit 1 "release.sh refuses a leading v" \
+    bash "${REPO_DIR}/tools/release.sh" v1.2.3
+assert_exit 1 "release.sh refuses no version at all" \
+    bash "${REPO_DIR}/tools/release.sh"
+assert_exit 1 "release.sh refuses two versions" \
+    bash "${REPO_DIR}/tools/release.sh" 1.2.3 1.2.4
+
 # A shallow clone or a tarball has no tags; only check when there are some.
 if [[ -n "$(git -C "$REPO_DIR" tag --list 'v*' 2>/dev/null)" ]]; then
     nearest_tag="$(git -C "$REPO_DIR" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"

@@ -16,7 +16,7 @@ PRUNE_ARG := $(if $(KEEP),--prune-backups=$(KEEP),--prune-backups)
 .PHONY: help install dotfiles update dry-run doctor doctor-quiet \
         uninstall uninstall-dry restore restore-only purge-tools \
         list-backups prune-backups lint docs docs-check \
-        test test-unit test-docker check
+        test test-unit test-docker check release release-dry
 
 help: ## Show this help
 	@printf '\n\033[1;36mbash-customizations\033[0m\n\n'
@@ -91,3 +91,14 @@ test-docker: ## Run the full install/uninstall round trip in a container
 test: test-unit test-docker ## Run all tests
 
 check: lint docs-check test ## Lint + docs + all tests (what CI runs)
+
+# ── Release ───────────────────────────────────────────────────────────────────
+# make release VERSION=1.1.0 — checks, stamps, commits and tags.  Never pushes;
+# `git push --follow-tags` is what starts the CI release job.
+VERSION ?=
+
+release: ## Cut a release locally: stamp, changelog, commit, tag (VERSION=X.Y.Z)
+	@bash $(REPO_DIR)/tools/release.sh $(VERSION)
+
+release-dry: ## Preview that release, changing nothing (VERSION=X.Y.Z)
+	@bash $(REPO_DIR)/tools/release.sh --dry-run $(VERSION)
