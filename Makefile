@@ -18,15 +18,26 @@ PRUNE_ARG := $(if $(KEEP),--prune-backups=$(KEEP),--prune-backups)
         list-backups prune-backups lint docs docs-check \
         test test-unit test-docker check release release-dry
 
-help: ## Show this help
-	@printf '\n\033[1;36mbash-customizations\033[0m\n\n'
-	@printf 'Usage: make \033[36m<target>\033[0m\n\n'
-	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
-	@printf '\n'
-	@printf 'Variables: \033[36mBACKUP\033[0m=<timestamp> for restore, \033[36mKEEP\033[0m=<n> for prune-backups\n\n'
+##@ General
 
-# ── Install ───────────────────────────────────────────────────────────────────
+# Groups come from the "##@ Name" lines below, so the order you read here is
+# the order the source is written in — the two cannot drift apart.
+help: ## Show this help
+	@printf '\n\033[1;36mbash-customizations\033[0m  \033[2m%s\033[0m\n' "$$(cat $(REPO_DIR)/VERSION 2>/dev/null)"
+	@printf '\nUsage: make \033[36m<target>\033[0m\n'
+	@awk 'BEGIN {FS = ":.*## "} \
+	     /^##@ / { printf "\n  \033[1m%s\033[0m\n", substr($$0, 5); next } \
+	     /^[a-zA-Z_-]+:.*## / { printf "    \033[36m%-14s\033[0m %s\n", $$1, $$2 }' \
+	     $(MAKEFILE_LIST)
+	@printf '\n  \033[1mVariables\033[0m\n'
+	@printf '    \033[36m%-16s\033[0m %s\n' \
+		'BACKUP=<ts>'  'which backup restore / restore-only uses' \
+		'KEEP=<n>'     'how many backups prune-backups keeps (default 5)' \
+		'VERSION=<x.y.z>' 'the version release / release-dry cuts'
+	@printf '\n'
+
+# ─────────────────────────────────────────────────────────────────────────────
+##@ Install & update
 
 install: ## Install all tools + deploy dotfiles
 	@bash $(REPO_DIR)/setup.sh
@@ -43,16 +54,17 @@ update: ## Fetch the newest release, then re-install tools and dotfiles
 update-tools: ## Upgrade the installed tools only, without fetching a new release
 	@bash $(REPO_DIR)/setup.sh --force
 
+dry-run: ## Preview what install would do without making any changes
+	@bash $(REPO_DIR)/setup.sh --dry-run
+
+# ─────────────────────────────────────────────────────────────────────────────
+##@ Inspect
+
 version: ## Show this checkout's version and the one currently installed
 	@bash $(REPO_DIR)/setup.sh --version
 	@installed=$$(grep -m1 '^VERSION=' "$$HOME/.local/share/bash-customizations/manifest" 2>/dev/null); \
 	 if [ -n "$$installed" ]; then echo "installed v$${installed#VERSION=}"; \
 	 else echo "installed version not recorded — run: make update"; fi
-
-dry-run: ## Preview what install would do without making any changes
-	@bash $(REPO_DIR)/setup.sh --dry-run
-
-# ── Diagnose ──────────────────────────────────────────────────────────────────
 
 doctor: ## Diagnose the setup and show fix instructions
 	@bash $(REPO_DIR)/doctor.sh
@@ -60,7 +72,8 @@ doctor: ## Diagnose the setup and show fix instructions
 doctor-quiet: ## Diagnose, printing only failures and warnings (for scripts/CI)
 	@bash $(REPO_DIR)/doctor.sh --quiet
 
-# ── Remove / restore ──────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+##@ Remove & restore
 
 uninstall: ## Remove managed symlinks and blocks from ~/.bashrc
 	@bash $(REPO_DIR)/uninstall.sh
@@ -83,7 +96,8 @@ list-backups: ## List available backup timestamps
 prune-backups: ## Delete all but the newest backups (KEEP=<n>, default 5)
 	@bash $(REPO_DIR)/uninstall.sh $(PRUNE_ARG)
 
-# ── Develop ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+##@ Develop
 
 lint: ## Syntax-check and shellcheck every script
 	@bash $(REPO_DIR)/tests/lint.sh
@@ -104,7 +118,8 @@ test: test-unit test-docker ## Run all tests
 
 check: lint docs-check test ## Lint + docs + all tests (what CI runs)
 
-# ── Release ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+##@ Release
 # make release VERSION=1.1.0 — checks, stamps, commits and tags.  Never pushes;
 # `git push --follow-tags` is what starts the CI release job.
 VERSION ?=
