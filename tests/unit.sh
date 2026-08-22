@@ -194,6 +194,30 @@ for module in $injected_modules; do
     assert_exists "${REPO_DIR}/bash/${module}" "module ${module} exists in the repo"
 done
 
+# The module list is written out in SIX places.  The two above are compared to
+# each other; the other four are fallbacks and check lists that only run when
+# the manifest is missing, so a stale one stays invisible until the day someone
+# actually needs it.  Adding or removing a module in a release means editing
+# every one of them — this is what catches the one you forgot.
+_module_set() { grep -oE '\.bash/[a-z_-]+\.sh' | sed 's|\.bash/||' | sort -u; }
+
+repo_modules=$(find "${REPO_DIR}/bash" -maxdepth 1 -name '*.sh' -exec basename {} \; | sort)
+assert_eq "$repo_modules" "$(printf '%s\n' "$injected_modules" | sort)" \
+    "the injected block lists exactly the modules in bash/"
+
+assert_eq "$repo_modules" \
+    "$(sed -n '/_use_default_targets()/,/^}$/p' "${REPO_DIR}/uninstall.sh" | _module_set)" \
+    "uninstall.sh's fallback target list is current"
+
+assert_eq "$repo_modules" \
+    "$(sed -n '/Fallback to the known list/,/^        )$/p' "${REPO_DIR}/doctor.sh" | _module_set)" \
+    "doctor.sh's fallback symlink list is current"
+
+assert_eq "$repo_modules" \
+    "$(grep -oE 'for mod in [a-z_. -]+; do' "${REPO_DIR}/doctor.sh" \
+       | sed 's/^for mod in //; s/; do$//' | tr ' ' '\n' | grep '\.sh$' | sort -u)" \
+    "doctor.sh's load-order check covers every module"
+
 # ══════════════════════════════════════════════════════════════════════════════
 suite "bash/help.sh — the cheatsheet parser"
 # ══════════════════════════════════════════════════════════════════════════════
