@@ -7,7 +7,7 @@
 
 # ── Navigation ────────────────────────────────────────────────────────────────
 
-# mkcd — make a directory and cd into it in one step.
+# mkcd <dir> — make a directory and cd into it in one step.
 mkcd() {
     [[ $# -ne 1 ]] && { echo "Usage: mkcd <dir>" >&2; return 1; }
     mkdir -p -- "$1" && cd -- "$1" || return 1
@@ -29,7 +29,7 @@ up() {
 
 # ── File operations ───────────────────────────────────────────────────────────
 
-# extract — auto-detect archive format and unpack it.
+# extract <archive> — auto-detect archive format and unpack it.
 extract() {
     if [[ $# -ne 1 ]]; then
         echo "Usage: extract <archive>" >&2
@@ -82,7 +82,7 @@ extract() {
     unset -f _need
 }
 
-# backup-file — create a dated backup copy of a file.
+# backup-file <file> — create a dated backup copy of a file.
 backup-file() {
     [[ $# -ne 1 ]] && { echo "Usage: backup-file <file>" >&2; return 1; }
     cp -v -- "$1" "${1}.bak.$(date +%Y%m%d_%H%M%S)"
@@ -90,7 +90,7 @@ backup-file() {
 
 # ── Process / system ──────────────────────────────────────────────────────────
 
-# port — show what process is listening on a given port.
+# port <number> — show what process is listening on a given port.
 port() {
     [[ $# -ne 1 ]] && { echo "Usage: port <number>" >&2; return 1; }
     if command -v ss &>/dev/null; then
@@ -104,8 +104,7 @@ port() {
 
 # ── Text / search ─────────────────────────────────────────────────────────────
 
-# grep-in — recursive grep with a cleaner interface.
-# Usage: grep-in <pattern> [path]
+# grep-in <pattern> [path] — recursive grep with a cleaner interface.
 grep-in() {
     local pattern="${1:?Usage: grep-in <pattern> [path]}"
     local search_path="${2:-.}"
@@ -114,7 +113,7 @@ grep-in() {
 
 # ── fzf helpers ───────────────────────────────────────────────────────────────
 
-# fcd — fuzzy cd: interactively pick a directory with fzf.
+# fcd [dir] — fuzzy cd: interactively pick a directory with fzf.
 fcd() {
     if ! command -v fzf &>/dev/null; then
         echo "fcd: fzf is not installed" >&2; return 1
@@ -210,7 +209,7 @@ myip() {
 
 # ── Development ───────────────────────────────────────────────────────────────
 
-# serve — start a simple HTTP server in the current directory.
+# serve [port] — start a simple HTTP server in the current directory.
 serve() {
     local port="${1:-8000}"
     echo "Serving http://localhost:${port}  (Ctrl-C to stop)"
@@ -233,7 +232,7 @@ reload() {
     source "${HOME}/.bashrc" && echo "~/.bashrc reloaded."
 }
 
-# tree-all — tree with hidden files, colours, and pager.
+# tree-all [path] — tree with hidden files, colours, and pager.
 tree-all() {
     if command -v tree &>/dev/null; then
         tree -aC -I '.git|node_modules|__pycache__|.venv' --dirsfirst "$@" | less -FRX
@@ -242,7 +241,7 @@ tree-all() {
     fi
 }
 
-# weather — quick weather report for a location.
+# weather [location] — quick weather report for a location.
 weather() {
     if ! command -v curl &>/dev/null; then
         echo "weather: curl is not installed" >&2; return 1
