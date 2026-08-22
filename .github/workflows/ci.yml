@@ -5,13 +5,21 @@ name: CI
 on:
   push:
     branches: [main]
+    # A pushed v* tag is what publishes a release (see the release job below).
+    # branches and tags are OR'd, so main still triggers exactly as before.
+    tags: ['v[0-9]*']
   pull_request:
   workflow_dispatch:
 
-# A newer push to the same branch makes the older run irrelevant.
+# Read-only by default; the release job opts itself up to contents: write.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run irrelevant — but a tag
+# build is publishing a release and must always be allowed to finish.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   lint:
@@ -31,6 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The suite checks VERSION against the newest tag; with the default
+          # shallow fetch there are no tags and that assertion silently skips.
+          fetch-depth: 0
       - name: Run unit tests
         run: make test-unit
 
@@ -50,3 +62,45 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install → doctor → uninstall → restore
         run: bash tests/docker.sh ${{ matrix.environment }}
+
+  release:
+    name: publish release
+    # Only for a pushed v* tag, and only once the whole suite has passed against
+    # that exact tag — the jobs above have no ref filter, so they run on the tag
+    # too and this needs: is a real gate rather than a formality.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, unit, roundtrip]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # gh release create writes a release and its notes
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tag matches the VERSION file
+        run: |
+          version="$(cat VERSION)"
+          if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION (${version})"
+            echo "Tags are cut by tools/release.sh, which keeps the two in step."
+            exit 1
+          fi
+
+      - name: Extract the release notes
+        run: |
+          bash tools/release.sh --notes "$(cat VERSION)" > "${RUNNER_TEMP}/notes.md"
+          cat "${RUNNER_TEMP}/notes.md"
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Re-running a failed job must not die on "release already exists".
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists — nothing to do."
+            exit 0
+          fi
+          # --verify-tag makes gh refuse rather than helpfully inventing a tag.
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file "${RUNNER_TEMP}/notes.md" \
+            --verify-tag
