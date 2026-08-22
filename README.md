@@ -134,7 +134,9 @@ Run `make` (or `make help`) to see all available targets:
 |---|---|
 | `make install` | Install all tools + deploy dotfiles |
 | `make dotfiles` | Deploy dotfiles only (tools already installed) |
-| `make update` | Upgrade all tools **and** re-deploy dotfiles |
+| `make update` | Fetch the newest release, then re-install tools and dotfiles |
+| `make update-tools` | Upgrade the installed tools only, without fetching a new release |
+| `make version` | Show this checkout's version and the one currently installed |
 | `make dry-run` | Preview what install would do without making changes |
 | `make doctor` | Diagnose the setup and show fix instructions |
 | `make doctor-quiet` | Same, printing only failures and warnings |
@@ -191,7 +193,7 @@ You can also invoke the scripts directly if you prefer:
 | `-q`, `--quiet` | Print only failures and warnings |
 | `-h`, `--help` | Print usage, the check list, and exit codes |
 
-To upgrade installed tools to their latest versions, run `make update` or `bash setup.sh --force`. See [Updating tools](#updating-tools) for per-tool commands.
+To move to the newest release, run `make update` — it fetches, then re-installs. To upgrade only the installed tools without changing release, use `make update-tools` (or `bash setup.sh --force`). See [Updating tools](#updating-tools).
 
 ---
 
@@ -689,7 +691,12 @@ For a personal addition that doesn't require touching `setup.sh`, skip step 2 an
 
 ## Updating tools
 
-Re-running `bash setup.sh` skips tools that are already installed. To upgrade to the latest versions use `--force`:
+`make update` does the whole job: `git pull --ff-only` for the newest release,
+then a full re-install. Use it after a release you want.
+
+To upgrade only the tools, leaving this checkout where it is, use
+`make update-tools`. Re-running `bash setup.sh` on its own skips tools that are
+already installed; `--force` is what upgrades them:
 
 ```/dev/null/update.sh#L1-8
 # Upgrade everything

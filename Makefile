@@ -13,7 +13,7 @@ RESTORE_ARG := $(if $(BACKUP),--restore=$(BACKUP),--restore)
 KEEP ?=
 PRUNE_ARG := $(if $(KEEP),--prune-backups=$(KEEP),--prune-backups)
 
-.PHONY: help install dotfiles update dry-run doctor doctor-quiet \
+.PHONY: help install dotfiles update update-tools version dry-run doctor doctor-quiet \
         uninstall uninstall-dry restore restore-only purge-tools \
         list-backups prune-backups lint docs docs-check \
         test test-unit test-docker check release release-dry
@@ -34,8 +34,20 @@ install: ## Install all tools + deploy dotfiles
 dotfiles: ## Deploy dotfiles only — skip tool installation
 	@bash $(REPO_DIR)/setup.sh --skip-tools
 
-update: ## Upgrade all tools AND re-deploy dotfiles (setup.sh --force)
+# "update" means what a user means by it: get the newest release.  The
+# tools-only behaviour this used to have lives on as update-tools.
+update: ## Fetch the newest release, then re-install tools and dotfiles
+	@git -C $(REPO_DIR) pull --ff-only
 	@bash $(REPO_DIR)/setup.sh --force
+
+update-tools: ## Upgrade the installed tools only, without fetching a new release
+	@bash $(REPO_DIR)/setup.sh --force
+
+version: ## Show this checkout's version and the one currently installed
+	@bash $(REPO_DIR)/setup.sh --version
+	@installed=$$(grep -m1 '^VERSION=' "$$HOME/.local/share/bash-customizations/manifest" 2>/dev/null); \
+	 if [ -n "$$installed" ]; then echo "installed v$${installed#VERSION=}"; \
+	 else echo "installed version not recorded — run: make update"; fi
 
 dry-run: ## Preview what install would do without making any changes
 	@bash $(REPO_DIR)/setup.sh --dry-run
