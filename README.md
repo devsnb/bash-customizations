@@ -2,6 +2,8 @@
 
 A clean, modular Bash setup built around five best-in-class shell tools.
 
+Once installed, run **`cheatsheet`** in your shell to see everything it added.
+
 ```/dev/null/tree.txt#L1-13
 ~
 ├── .bashrc                  ← thin orchestrator (load order only)
@@ -14,9 +16,23 @@ A clean, modular Bash setup built around five best-in-class shell tools.
 │   ├── bindings.sh          ← key bindings (arrow history search, etc.)
 │   ├── functions.sh         ← utility shell functions
 │   ├── aliases.sh           ← aliases (ls, git, docker, …)
-│   └── prompt.sh            ← Starship init + fallback PS1
+│   ├── prompt.sh            ← Starship init + fallback PS1
+│   └── help.sh              ← the `cheatsheet` command
 └── starship.toml            ← Starship config (symlinked → ~/.config/)
 ```
+
+---
+
+## Contents
+
+- [Repository layout](#repository-layout) · [Tools](#tools) · [Scripts](#scripts)
+- [Prerequisites](#prerequisites) · [Quick start](#quick-start) · [Script flags](#script-flags)
+- [Uninstalling](#uninstalling) · [Diagnosing a broken setup](#diagnosing-a-broken-setup) · [Troubleshooting](#troubleshooting)
+- [Recovery reference](#recovery-reference) · [How backups work](#how-backups-work)
+- [Load order](#load-order) · [ble.sh + fzf: the keymap split](#blesh--fzf-the-keymap-split)
+- [Module reference](#module-reference) — the full alias and function tables
+- [Customisation](#customisation) · [Adding a new module](#adding-a-new-module) · [Updating tools](#updating-tools)
+- [Testing](#testing) · [Contributing](#contributing)
 
 ---
 
@@ -46,7 +62,7 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 
 ## Tools
 
-| Tool | Version | Purpose |
+| Tool | Minimum | Purpose |
 |---|---|---|
 | [starship](https://starship.rs) | v1.25.1 | Cross-shell prompt with git, language, and time info |
 | [ble.sh](https://github.com/akinomyoga/ble.sh) | nightly | Syntax highlighting, smart completion, auto-suggestions |
@@ -54,7 +70,9 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 | [fzf](https://github.com/junegunn/fzf) | v0.62.0 | Fuzzy file finder — CTRL-T, CTRL-R, ALT-C |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | v0.9.9 | Frecency-ranked directory jumper (`z`, `zi`) |
 
-> Versions listed are what `setup.sh` targets. Run `bash doctor.sh` to see what is actually installed on your system.
+> Nothing is pinned: `setup.sh` installs the current release of each tool, so what
+> you get will usually be newer than the minimum above. Run `bash doctor.sh` to see
+> the versions actually installed on your system.
 
 ---
 
@@ -76,6 +94,15 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 | `curl` or `wget` | downloading tools | `command -v curl` |
 | `git` | fzf install | `command -v git` |
 | **en_US.UTF-8 locale** | **ble.sh needs it — missing locale causes garbage in prompt** | `locale -a \| grep en_US` |
+| `make` *(optional)* | only for the `make` targets below — `bash setup.sh` does the same job | `command -v make` |
+
+**Keep the clone where it is.** Every deployed file is a symlink back into this
+repository, so moving or deleting it after install breaks your shell config. If you
+do move it, re-run `bash setup.sh --skip-tools` from the new location.
+
+All three scripts exit `0` on success and `1` on failure. `doctor.sh` exits `0` when
+there are no failures even if it printed warnings — warnings are advisory, so it is
+safe to gate CI on `bash doctor.sh --quiet`.
 
 ### Install the locale (WSL / Ubuntu / Debian)
 
@@ -119,8 +146,12 @@ Run `make` (or `make help`) to see all available targets:
 | `make list-backups` | List available backups |
 | `make prune-backups` | Delete all but the newest backups — `KEEP=<n>` (default 5) |
 | `make lint` | `bash -n` + shellcheck every script |
+| `make docs` | Regenerate the README alias/function tables from `bash/*.sh` |
+| `make docs-check` | Fail if those tables are stale |
+| `make test-unit` | Module behaviour and argument handling — no container needed |
+| `make test-docker` | The full install → doctor → uninstall → restore round trip |
 | `make test` | Unit tests + the container round trip |
-| `make check` | Lint and test — what CI runs |
+| `make check` | Lint, docs, and test — what CI runs |
 
 You can also invoke the scripts directly if you prefer:
 
@@ -320,8 +351,9 @@ has constraints on when it must run relative to others.
 ├─ 6. functions.sh              ← shell functions
 ├─ 7. aliases.sh                ← aliases
 ├─ 8. prompt.sh                 ← starship init bash (installs PROMPT_COMMAND)
+├─ 9. help.sh                   ← the `cheatsheet` command (no ordering constraints)
 │
-└─ 9. ble-attach                ← MUST be last (takes over readline after Starship)
+└─ 10. ble-attach               ← MUST be last (takes over readline after Starship)
 ```
 
 ### Why this order?
@@ -596,6 +628,14 @@ Generated from the ` #: ` descriptions in [`bash/aliases.sh`](bash/aliases.sh) �
 Runs `eval "$(starship init bash)"`. Falls back to a minimal coloured `PS1`
 if Starship is not installed.
 
+### `help.sh`
+Defines `cheatsheet [filter]`, which prints the two tables above from the live
+`~/.bash/` copies — so it works with no repo present, and it marks entries whose
+optional tool (`eza`, `docker`) is not installed on this machine.
+
+Sourcing it does no work at all; the files are parsed only when you actually run
+`cheatsheet`, so it adds nothing to shell startup.
+
 ### `starship.toml`
 - **Palette** — Catppuccin Mocha (matches fzf colours in `exports.sh`)
 - **Format** — `os › user@host › dir › git_branch+status › lang_modules ··· duration · jobs · time`
@@ -639,7 +679,9 @@ To integrate a new module into the managed setup (tracked by setup.sh and doctor
 1. Create `bash/mymodule.sh`
 2. Add `_src "$HOME/.bash/mymodule.sh"` to the `_gen_head_block()` function in `setup.sh` at the appropriate load-order position
 3. Run `bash setup.sh --skip-tools` — this both deploys the symlink and regenerates the managed block with your new `_src` line
-4. Run `bash doctor.sh` to confirm the new module is wired correctly
+4. Add it to the reference `.bashrc` at the same position — `tests/unit.sh` compares
+   the two lists and fails if they disagree
+5. Run `bash doctor.sh` to confirm the new module is wired correctly
 
 For a personal addition that doesn't require touching `setup.sh`, skip step 2 and instead add a `source "$HOME/.bash/mymodule.sh"` line directly to `~/.bashrc` **outside** the managed blocks — between `# === END bash-customizations ===` and `# === BEGIN bash-customizations-attach ===`. Then run `bash setup.sh --skip-tools` to deploy the symlink.
 
@@ -671,10 +713,15 @@ tested where that is safe to do for real: in throwaway containers.
 
 ```sh
 make lint         # bash -n on every script + shellcheck (skipped if not installed)
+make docs-check   # fail if the README tables no longer match bash/*.sh
 make test-unit    # module behaviour and argument handling — no container needed
 make test-docker  # the full install → doctor → uninstall → restore round trip
 make check        # everything CI runs
 ```
+
+The unit suite also enforces the two rules that keep the docs honest: every alias
+carries a ` #: ` description and every function a `— ` one, and the committed README
+matches what `make docs` would produce. Adding an undocumented alias fails the build.
 
 `make test-docker` builds three environments from `tests/integration/Dockerfile`
 and runs the same suite in each, because the interesting failures are
@@ -712,4 +759,9 @@ Code style:
   only repo-wide false positives belong in `.shellcheckrc`.
 - Use `if command -v TOOL &>/dev/null; then` before calling optional tools.
 - Guard `&&` chains that could return non-zero with `if`/`fi` (required by `set -e`).
-- Document new functions with a one-line description in `functions.sh` and a row in the README table.
+- Document every new alias with a trailing ` #: description` and every new function
+  with a `# name [args] — description` comment above it, then run `make docs`. Those
+  comments are the single source for `cheatsheet` and the README tables — there is no
+  table to edit by hand.
+- Aliases must be single-line and must not contain a `#` or a backtick in their
+  expansion; the tests enforce both.
