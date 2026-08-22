@@ -73,16 +73,14 @@ FORCE=false
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Colour codes
-RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
-
-log_info()    { echo -e "${BLUE}[INFO]${RESET}  $*"; }
-log_ok()      { echo -e "${GREEN}[OK]${RESET}    $*"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${RESET}  $*"; }
-log_error()   { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
-log_section() { echo -e "\n${BOLD}${CYAN}══ $* ══${RESET}"; }
-log_dry()     { echo -e "${YELLOW}[DRY]${RESET}   $*"; }
+# Palette, glyphs, log_* and has() are shared with doctor.sh and uninstall.sh.
+if [[ ! -f "${REPO_DIR}/lib/log.sh" ]]; then
+    echo "setup.sh: cannot find ${REPO_DIR}/lib/log.sh" >&2
+    echo "          The repository looks incomplete — re-clone it and try again." >&2
+    exit 1
+fi
+# shellcheck source=lib/log.sh
+source "${REPO_DIR}/lib/log.sh"
 
 # run CMD [args…] — execute or just print in dry-run mode.
 run() {
@@ -92,9 +90,6 @@ run() {
         "$@"
     fi
 }
-
-# has CMD — true if the command exists on PATH.
-has() { command -v "$1" &>/dev/null; }
 
 # _as_root CMD [args…] — run a command with root privileges, if we can.
 #
@@ -158,9 +153,9 @@ backup_if_exists() {
     # up as $BACKUP_DIR/.config/starship.toml, not flat as $BACKUP_DIR/starship.toml.
     local rel_path="${target#"${HOME}/"}"
     if $DRY_RUN; then
-        log_dry "Back up $target → $BACKUP_DIR/${rel_path}"
+        log_dry "Back up $target ${GLYPH_ARROW} $BACKUP_DIR/${rel_path}"
     else
-        log_info "Backing up $target → $BACKUP_DIR/${rel_path}"
+        log_info "Backing up $target ${GLYPH_ARROW} $BACKUP_DIR/${rel_path}"
     fi
     run mkdir -p "${BACKUP_DIR}/$(dirname "$rel_path")"
     run cp -a "$target" "${BACKUP_DIR}/${rel_path}"
@@ -201,7 +196,7 @@ deploy_file() {
     else
         ln -sf "$src" "$dest"
         DEPLOYED_LINKS+=("$dest")
-        log_ok "Linked: $dest → $src"
+        log_ok "Linked: $dest ${GLYPH_ARROW} $src"
     fi
 }
 
@@ -502,7 +497,7 @@ install_fzf() {
             # "symlinks into this repo", and both uninstall.sh and doctor.sh
             # treat anything else as suspicious.  This link belongs to the fzf
             # install and is cleaned up by --purge-tools instead.
-            log_ok "Linked ~/.fzf/bin/fzf → ${LOCAL_BIN}/fzf"
+            log_ok "Linked ~/.fzf/bin/fzf ${GLYPH_ARROW} ${LOCAL_BIN}/fzf"
         fi
     elif has apt-get && root_available; then
         _as_root apt-get update -qq && _as_root apt-get install -y fzf
@@ -947,11 +942,7 @@ verify() {
 # ══════════════════════════════════════════════════════════════════════════════
 
 print_banner() {
-    echo -e "${BOLD}${CYAN}"
-    echo "╔══════════════════════════════════════════════════╗"
-    echo "║          bash-customizations  setup.sh           ║"
-    echo "╚══════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
+    log_banner "setup.sh"
     if $DRY_RUN;    then echo -e "${YELLOW}  DRY-RUN mode — no changes will be made${RESET}\n"; fi
     if $SKIP_TOOLS; then echo -e "${YELLOW}  --skip-tools — dotfile deployment only${RESET}\n"; fi
 }

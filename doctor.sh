@@ -61,37 +61,49 @@ WARNINGS=0           # incremented for every WARN — advisory, never fails the 
 # Colours & output helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+# Palette, glyphs, log_* and has() are shared with setup.sh and uninstall.sh.
+if [[ ! -f "${REPO_DIR}/lib/log.sh" ]]; then
+    echo "doctor.sh: cannot find ${REPO_DIR}/lib/log.sh" >&2
+    echo "           The repository looks incomplete — re-clone it and try again." >&2
+    exit 1
+fi
+# shellcheck source=lib/log.sh
+source "${REPO_DIR}/lib/log.sh"
 
-log_section() { echo -e "\n${BOLD}${CYAN}── $* ──${RESET}"; }
+# doctor's sections group individual checks rather than whole phases of a run,
+# so they get the lighter rule.  log_section reads this at call time.
+SECTION_RULE="$RULE_LIGHT"
+
+# doctor speaks in checks, not steps: pass/fail/warn/info read better against a
+# list of diagnostics than log_ok/log_error would.  They are the same family —
+# same palette, same glyph set — with a result column instead of a level prefix.
 
 # pass MESSAGE — a check that passed.
 pass() {
     if $QUIET; then return 0; fi
-    echo -e "  ${GREEN}✔${RESET}  $*"
+    echo -e "  ${GREEN}${GLYPH_OK}${RESET}  $*"
 }
 
 # fail MESSAGE FIX — a check that failed.  FIX is printed as a suggestion.
 fail() {
     local msg="$1" fix="${2:-}"
-    echo -e "  ${RED}✘${RESET}  ${BOLD}${msg}${RESET}"
-    if [[ -n "$fix" ]]; then echo -e "       ${YELLOW}→ Fix:${RESET} ${fix}"; fi
+    echo -e "  ${RED}${GLYPH_FAIL}${RESET}  ${BOLD}${msg}${RESET}"
+    if [[ -n "$fix" ]]; then echo -e "       ${YELLOW}${GLYPH_ARROW} Fix:${RESET} ${fix}"; fi
     (( FAILURES++ )) || true
 }
 
 # warn MESSAGE SUGGESTION
 warn() {
     local msg="$1" suggestion="${2:-}"
-    echo -e "  ${YELLOW}!${RESET}  ${msg}"
-    if [[ -n "$suggestion" ]]; then echo -e "       ${YELLOW}→ Tip:${RESET} ${suggestion}"; fi
+    echo -e "  ${YELLOW}${GLYPH_WARN}${RESET}  ${msg}"
+    if [[ -n "$suggestion" ]]; then echo -e "       ${YELLOW}${GLYPH_ARROW} Tip:${RESET} ${suggestion}"; fi
     (( WARNINGS++ )) || true
 }
 
 # info MESSAGE — informational, never counts as an issue.
 info() {
     if $QUIET; then return 0; fi
-    echo -e "  ${BLUE}i${RESET}  $*"
+    echo -e "  ${BLUE}${GLYPH_INFO}${RESET}  $*"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -131,7 +143,7 @@ parse_args() {
                 exit 0
                 ;;
             *)
-                echo "Unknown argument: $arg  (use --help)" >&2
+                log_error "Unknown argument: $arg  (use --help)"
                 exit 1
                 ;;
         esac
@@ -425,7 +437,7 @@ check_symlinks() {
         if [[ ! -e "$link" ]]; then
             local dangling_target
             dangling_target="$(readlink "$link")"
-            fail "${link} is a DANGLING symlink → ${dangling_target}" \
+            fail "${link} is a DANGLING symlink ${GLYPH_ARROW} ${dangling_target}" \
                  "bash setup.sh --skip-tools  (re-link; repo may have moved)"
             continue
         fi
@@ -439,12 +451,12 @@ check_symlinks() {
             continue
         fi
         if [[ "$target" != "${REPO_DIR}/"* ]]; then
-            warn "${link} → ${target}  (does not point into repo at ${REPO_DIR})" \
+            warn "${link} ${GLYPH_ARROW} ${target}  (does not point into repo at ${REPO_DIR})" \
                  "This file is not managed by us. Inspect manually."
             continue
         fi
 
-        pass "${link} → ${target##"${REPO_DIR}/"}"
+        pass "${link} ${GLYPH_ARROW} ${target##"${REPO_DIR}/"}"
     done
 }
 
@@ -639,9 +651,16 @@ check_history() {
 # Summary
 # ══════════════════════════════════════════════════════════════════════════════
 
+# A plain horizontal rule, drawn with whatever the terminal can render.
+_rule() {
+    local i line=''
+    for (( i = 0; i < 56; i++ )); do line+="$BOX_H"; done
+    echo "$line"
+}
+
 print_summary() {
     echo
-    echo "────────────────────────────────────────────────────────"
+    _rule
     if [[ "$FAILURES" -eq 0 && "$WARNINGS" -eq 0 ]]; then
         echo -e "  ${GREEN}${BOLD}All checks passed.${RESET}  Setup looks healthy."
     elif [[ "$FAILURES" -eq 0 ]]; then
@@ -657,15 +676,11 @@ print_summary() {
     echo "    bash setup.sh                Re-run full install"
     echo "    bash uninstall.sh --restore  Restore your backup (undo everything)"
     echo "    bash uninstall.sh --list-backups   See available backups"
-    echo "────────────────────────────────────────────────────────"
+    _rule
 }
 
 print_banner() {
-    echo -e "${BOLD}${CYAN}"
-    echo "╔══════════════════════════════════════════════════╗"
-    echo "║        bash-customizations  doctor.sh            ║"
-    echo "╚══════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
+    log_banner "doctor.sh"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -81,16 +81,14 @@ PURGED=false            # true once tool binaries were actually removed
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
-
-log_info()    { echo -e "${BLUE}[INFO]${RESET}  $*"; }
-log_ok()      { echo -e "${GREEN}[OK]${RESET}    $*"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${RESET}  $*"; }
-log_error()   { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
-log_section() { echo -e "\n${BOLD}${CYAN}══ $* ══${RESET}"; }
-log_dry()     { echo -e "${YELLOW}[DRY]${RESET}   $*"; }
-log_skip()    { echo -e "        (skipped) $*"; }
+# Palette, glyphs, log_* and has() are shared with setup.sh and doctor.sh.
+if [[ ! -f "${REPO_DIR}/lib/log.sh" ]]; then
+    echo "uninstall.sh: cannot find ${REPO_DIR}/lib/log.sh" >&2
+    echo "              The repository looks incomplete — re-clone it and try again." >&2
+    exit 1
+fi
+# shellcheck source=lib/log.sh
+source "${REPO_DIR}/lib/log.sh"
 
 # run CMD… — execute unless this is a dry run.  Deliberately silent: every
 # mutation is announced by the report() call that follows it, in the caller's
@@ -408,7 +406,7 @@ remove_symlinks() {
             continue
         fi
         if [[ "$target" != "${MANIFEST_REPO}/"* && "$target" != "${MANIFEST_REPO}" ]]; then
-            log_warn "Points outside repo — skipping: $link → $target"
+            log_warn "Points outside repo — skipping: $link ${GLYPH_ARROW} $target"
             (( skipped++ )) || true
             continue
         fi
@@ -678,11 +676,7 @@ remove_manifest() {
 # ══════════════════════════════════════════════════════════════════════════════
 
 print_banner() {
-    echo -e "${BOLD}${CYAN}"
-    echo "╔══════════════════════════════════════════════════╗"
-    echo "║       bash-customizations  uninstall.sh          ║"
-    echo "╚══════════════════════════════════════════════════╝"
-    echo -e "${RESET}"
+    log_banner "uninstall.sh"
     if $DRY_RUN; then echo -e "${YELLOW}  DRY-RUN mode — no changes will be made${RESET}\n"; fi
 }
 

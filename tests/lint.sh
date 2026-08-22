@@ -16,6 +16,7 @@ status=0
 mapfile -t SCRIPTS < <(
     printf '%s\n' setup.sh doctor.sh uninstall.sh
     printf '%s\n' bash/*.sh
+    printf '%s\n' lib/*.sh
     printf '%s\n' tests/*.sh tests/lib/*.sh
     printf '%s\n' .bashrc .blerc
 )
