@@ -15,7 +15,8 @@ PRUNE_ARG := $(if $(KEEP),--prune-backups=$(KEEP),--prune-backups)
 
 .PHONY: help install dotfiles update dry-run doctor doctor-quiet \
         uninstall uninstall-dry restore restore-only purge-tools \
-        list-backups prune-backups lint test test-unit test-docker check
+        list-backups prune-backups lint docs docs-check \
+        test test-unit test-docker check
 
 help: ## Show this help
 	@printf '\n\033[1;36mbash-customizations\033[0m\n\n'
@@ -75,6 +76,12 @@ prune-backups: ## Delete all but the newest backups (KEEP=<n>, default 5)
 lint: ## Syntax-check and shellcheck every script
 	@bash $(REPO_DIR)/tests/lint.sh
 
+docs: ## Regenerate the README alias/function tables from bash/*.sh
+	@bash $(REPO_DIR)/tools/gen-docs.sh
+
+docs-check: ## Fail if those tables are stale (fix with: make docs)
+	@bash $(REPO_DIR)/tools/gen-docs.sh --check
+
 test-unit: ## Run the unit tests (no container required)
 	@bash $(REPO_DIR)/tests/unit.sh
 
@@ -83,4 +90,4 @@ test-docker: ## Run the full install/uninstall round trip in a container
 
 test: test-unit test-docker ## Run all tests
 
-check: lint test ## Lint + all tests (what CI runs)
+check: lint docs-check test ## Lint + docs + all tests (what CI runs)

@@ -23,6 +23,8 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       - name: Lint
         run: make lint
+      - name: README tables are current
+        run: make docs-check
 
   unit:
     name: unit tests

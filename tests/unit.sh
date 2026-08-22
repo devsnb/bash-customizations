@@ -297,4 +297,15 @@ assert_not_contains "$sheet" "dkps" "a filter excludes non-matching entries"
 assert_contains "$(bash --norc -c "source '${WORK}/fakebash/help.sh'; cheatsheet zzzznope")" \
     "no matches" "an unmatched filter says so instead of printing nothing"
 
+# ── The README tables are generated from the same records ───────────────────
+
+# Also asserted by `make docs-check`; duplicated here so a bare `make test-unit`
+# catches a stale README too.
+assert_exit 0 "the README alias/function tables are up to date (else: make docs)" \
+    bash "${REPO_DIR}/tools/gen-docs.sh" --check
+
+# A backtick in an expansion would break the code span the table wraps it in.
+assert_eq "" "$(grep -E '^[[:space:]]*alias[[:space:]].* #: ' "${REPO_DIR}/bash/aliases.sh" | sed 's/ #: .*//' | grep '`' || true)" \
+    "no alias expansion contains a backtick"
+
 finish

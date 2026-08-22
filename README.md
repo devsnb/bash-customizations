@@ -405,36 +405,192 @@ ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 
 ### `functions.sh`
 
+Generated from the `# name — description` comments in [`bash/functions.sh`](bash/functions.sh) — run `make docs` after editing them.
+
+<!-- BEGIN GENERATED: functions -->
+
+#### Navigation
+
 | Function | Description |
 |---|---|
-| `mkcd <dir>` | `mkdir -p` + `cd` |
-| `up [n]` | Go up *n* directory levels |
-| `extract <archive>` | Auto-detect and unpack any archive format |
-| `bak <file>` | Create a timestamped backup copy |
-| `port <n>` | Show what's listening on port *n* |
-| `find-in <pat> [path]` | Recursive coloured grep |
-| `fcd [dir]` | Fuzzy `cd` using fzf; optional starting directory (default: `.`) |
-| `fkill [signal]` | Interactively pick and kill a process; optional signal number (default: `15` / SIGTERM) |
-| `myip` | Show public + local IP |
-| `serve [port]` | Python HTTP server in current dir |
-| `reload` | Re-source `~/.bashrc` in place (may cause prompt glitches when ble.sh is active — prefer opening a new terminal) |
-| `tre` | `tree` with hidden files + pager |
-| `weather [location]` | wttr.in weather report |
+| `mkcd <dir>` | make a directory and cd into it in one step |
+| `up [n]` | go up n levels in the directory tree (default: 1) |
+
+#### File operations
+
+| Function | Description |
+|---|---|
+| `extract <archive>` | auto-detect archive format and unpack it |
+| `backup-file <file>` | create a dated backup copy of a file |
+
+#### Process / system
+
+| Function | Description |
+|---|---|
+| `port <number>` | show what process is listening on a given port |
+
+#### Text / search
+
+| Function | Description |
+|---|---|
+| `grep-in <pattern> [path]` | recursive grep with a cleaner interface |
+
+#### fzf helpers
+
+| Function | Description |
+|---|---|
+| `fcd [dir]` | fuzzy cd: interactively pick a directory with fzf |
+| `fkill [-s SIGNAL] [filter]` | interactively pick a process and kill it |
+
+#### Network
+
+| Function | Description |
+|---|---|
+| `myip` | show public and local IP addresses |
+
+#### Development
+
+| Function | Description |
+|---|---|
+| `serve [port]` | start a simple HTTP server in the current directory |
+
+#### Miscellaneous
+
+| Function | Description |
+|---|---|
+| `reload` | re-source ~/.bashrc without starting a new shell |
+| `tree-all [path]` | tree with hidden files, colours, and pager |
+| `weather [location]` | quick weather report for a location |
+<!-- END GENERATED: functions -->
 
 ### `aliases.sh`
-- **Safety** — `cp/mv/rm` with `-iv`, `mkdir -pv`
-- **ls** — prefers `eza` when installed: `ls`, `ll`, `la`, `l` (standard views), `lt` (tree 2 levels), `llt` (tree 3 levels, long form); falls back to `ls --color`
-- **cat/less** — prefers `bat` when installed; falls back to standard commands
-- **Navigation** — `..` / `...` / `....` (go up 1–3 levels), `~` (go home), `-` (go to previous directory)
-- **grep** — `grep`, `fgrep`, `egrep` all with `--color=auto`
-- **Disk usage** — `df -h`, `du -h`, `dud` (subdirectory sizes), `duf` (files in current dir)
-- **Processes** — `psa` (`ps auxf`), `psg <name>` (grep process list)
-- **Network** — `ping -c 5`, `ports` (`ss -tulpn` — list listening ports)
-- **Editor** — `v` / `vi` → `$EDITOR` (defaults to `nano`)
-- **git** — `gs`, `gl`, `gd`, `gc`, `gp`, `gpl`, `gco`, `gst`, …
-- **docker** — `dk`, `dkps`, `dkpsa`, `dki`, `dkrm`, `dkrmi`, `dkx`, `dkl`, `dkc`, `dkcu`, `dkcd` (only if `docker` is installed)
-- **System** — `h` (history), `j` (jobs), `path` (print `$PATH` entries one per line), `now` (current datetime), `week` (ISO week number), `cls` (full terminal reset including scrollback)
-- **Config shortcuts** — `bashrc` opens `~/.bashrc` in `$EDITOR`; `aliases` opens `~/.bash/aliases.sh`
+
+Generated from the ` #: ` descriptions in [`bash/aliases.sh`](bash/aliases.sh) — run `make docs` after editing them. Run `cheatsheet` in your shell for the same list, filtered to what is actually installed.
+
+<!-- BEGIN GENERATED: aliases -->
+
+#### Safety rails
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `cp` | `cp -iv` | copy, asking first and saying what it did |
+| `mv` | `mv -iv` | move, asking first and saying what it did |
+| `rm` | `rm -iv` | delete, asking about each file |
+| `mkdir` | `mkdir -pv` | make a directory, parents included |
+
+#### Directory listing
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `ls` | `eza --group-directories-first --icons=auto --color=auto` | list files, directories first |
+| `ll` | `eza -lah --group-directories-first --icons=auto --git` | long listing with sizes, dates and git state |
+| `la` | `eza -a   --group-directories-first --icons=auto` | list everything, dotfiles included |
+| `l` | `eza --icons=auto --color=auto` | compact listing |
+| `lt` | `eza --tree --level=2 --icons=auto` | tree view, two levels deep *(requires `eza`)* |
+| `llt` | `eza --tree --level=3 -lah --icons=auto --git` | tree view, three levels deep, long form *(requires `eza`)* |
+
+#### Navigation
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `..` | `cd ..` | go up one directory |
+| `...` | `cd ../..` | go up two directories |
+| `....` | `cd ../../..` | go up three directories |
+| `~` | `cd ~` | go to your home directory |
+| `-` | `cd -` | go back to the previous directory |
+
+#### Grep
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `grep` | `grep --color=auto` | grep with matches highlighted |
+| `fgrep` | `fgrep --color=auto` | grep for a literal string, highlighted |
+| `egrep` | `egrep --color=auto` | grep with extended regexes, highlighted |
+
+#### Disk usage
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `df` | `df -h` | free space per filesystem, in readable units |
+| `du` | `du -h` | disk usage, in readable units |
+| `du-dirs` | `du -d1 -h` | size of each subdirectory below here |
+| `du-files` | `du -sh *` | size of each entry in this directory |
+
+#### Processes
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `psa` | `ps auxf` | every process, as a tree |
+| `psg` | `ps aux \| grep -v grep \| grep -i` | search the process list, e.g. psg nginx |
+
+#### Network
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `ping` | `ping -c 5` | ping, stopping after five packets |
+| `ports` | `ss -tulpn` | every listening port and the process behind it |
+
+#### Editor
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `v` | `${EDITOR:-nano}` | open a file in $EDITOR |
+
+#### Git
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `g` | `git` | git |
+| `gs` | `git status -sb` | short status with branch and ahead/behind |
+| `ga` | `git add` | stage a file |
+| `gaa` | `git add --all` | stage every change |
+| `gc` | `git commit` | commit staged changes |
+| `gcm` | `git commit -m` | commit with a message |
+| `gco` | `git checkout` | switch branch or restore a file |
+| `gd` | `git diff` | what has changed but is not staged |
+| `gds` | `git diff --staged` | what is staged for the next commit |
+| `gl` | `git log --oneline --graph --decorate --all` | one-line commit graph of every branch |
+| `gp` | `git push` | push to the remote |
+| `gpl` | `git pull` | pull from the remote |
+| `gb` | `git branch` | list local branches |
+| `gba` | `git branch -a` | list local and remote branches |
+| `gst` | `git stash` | stash your uncommitted changes |
+| `gstp` | `git stash pop` | reapply the most recent stash |
+
+#### Docker
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `dk` | `docker` | docker *(requires `docker`)* |
+| `dkps` | `docker ps` | running containers *(requires `docker`)* |
+| `dkpsa` | `docker ps -a` | every container, stopped ones included *(requires `docker`)* |
+| `dki` | `docker images` | images on this machine *(requires `docker`)* |
+| `dkrm` | `docker rm` | remove a container *(requires `docker`)* |
+| `dkrmi` | `docker rmi` | remove an image *(requires `docker`)* |
+| `dkx` | `docker exec -it` | run a command in a running container *(requires `docker`)* |
+| `dkl` | `docker logs -f` | follow a container's logs *(requires `docker`)* |
+| `dkc` | `docker compose` | docker compose *(requires `docker`)* |
+| `dkcu` | `docker compose up -d` | start the compose stack detached *(requires `docker`)* |
+| `dkcd` | `docker compose down` | stop and remove the compose stack *(requires `docker`)* |
+
+#### System
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `h` | `history` | your command history |
+| `j` | `jobs -l` | background jobs, with their PIDs |
+| `path` | `echo -e "${PATH//:/\\n}"` | print each PATH entry on its own line |
+| `now` | `date +"%Y-%m-%d %T"` | the current date and time |
+| `week` | `date +%V` | the current ISO week number |
+| `cls` | `printf "\033c"` | clear the screen and the scrollback buffer |
+
+#### Reload / edit config
+
+| Alias | Expands to | Description |
+|---|---|---|
+| `bashrc` | `${EDITOR:-nano} ~/.bashrc` | edit ~/.bashrc in $EDITOR |
+| `edit-aliases` | `${EDITOR:-nano} ~/.bash/aliases.sh` | edit this file in $EDITOR |
+<!-- END GENERATED: aliases -->
 
 ### `prompt.sh`
 Runs `eval "$(starship init bash)"`. Falls back to a minimal coloured `PS1`
