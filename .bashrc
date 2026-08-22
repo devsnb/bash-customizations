@@ -28,7 +28,9 @@
 #   6. functions.sh    — shell functions
 #   7. aliases.sh      — aliases
 #   8. prompt.sh       — Starship (sets PROMPT_COMMAND / PS1)
-#   9. ble.sh  Part 2  — must be LAST (attaches after full env is ready)
+#   9. help.sh         — the `cheatsheet` command (no ordering constraints,
+#                        so it goes last rather than renumbering everything)
+#  10. ble.sh  Part 2  — must be LAST (attaches after full env is ready)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Guard: non-interactive shells get nothing ─────────────────────────────────
@@ -86,9 +88,12 @@ _src "$HOME/.bash/aliases.sh"
 # ── 8. Prompt (Starship) ──────────────────────────────────────────────────────
 _src "$HOME/.bash/prompt.sh"
 
+# ── 9. cheatsheet ─────────────────────────────────────────────────────────────
+_src "$HOME/.bash/help.sh"
+
 unset -f _src
 
-# ── 9. ble.sh — Part 2: attach NOW (after Starship has registered its hooks) ──
+# ── 10. ble.sh — Part 2: attach NOW (after Starship has registered its hooks) ──
 # ble-attach hands readline control to ble.sh.  It must be the absolute
 # last interactive statement in this file.
 [[ ${BLE_VERSION:-} ]] && ble-attach

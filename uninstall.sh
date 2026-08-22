@@ -235,6 +235,7 @@ _use_default_targets() {
         "${HOME}/.bash/completion.sh"
         "${HOME}/.bash/exports.sh"
         "${HOME}/.bash/functions.sh"
+        "${HOME}/.bash/help.sh"
         "${HOME}/.bash/history.sh"
         "${HOME}/.bash/init.sh"
         "${HOME}/.bash/prompt.sh"

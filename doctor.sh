@@ -408,6 +408,7 @@ check_symlinks() {
             "${HOME}/.bash/completion.sh"
             "${HOME}/.bash/exports.sh"
             "${HOME}/.bash/functions.sh"
+            "${HOME}/.bash/help.sh"
             "${HOME}/.bash/history.sh"
             "${HOME}/.bash/init.sh"
             "${HOME}/.bash/prompt.sh"
@@ -527,7 +528,7 @@ check_bashrc() {
     # ── Content checks (grep by pattern — work the same as before) ────────────
     local ln_blesh_source ln_blesh_attach
     local ln_exports ln_history ln_completion ln_init ln_bindings
-    local ln_functions ln_aliases ln_prompt
+    local ln_functions ln_aliases ln_prompt ln_help
 
     ln_blesh_source="$(_lineno 'source.*attach=none')"
     ln_blesh_attach="$(_lineno '&&.*ble-attach\|^\s*ble-attach')"
@@ -539,6 +540,7 @@ check_bashrc() {
     ln_functions="$(_lineno '[[:space:]_]*src.*functions\.sh\|source.*functions\.sh')"
     ln_aliases="$(_lineno '[[:space:]_]*src.*aliases\.sh\|source.*aliases\.sh')"
     ln_prompt="$(_lineno '[[:space:]_]*src.*prompt\.sh\|source.*prompt\.sh')"
+    ln_help="$(_lineno '[[:space:]_]*src.*help\.sh\|source.*help\.sh')"
 
     if [[ "$ln_blesh_source" -eq 0 ]]; then
         fail "ble.sh --attach=none not found inside HEAD block" \
@@ -555,8 +557,9 @@ check_bashrc() {
         [completion.sh]="$ln_completion" [init.sh]="$ln_init"
         [bindings.sh]="$ln_bindings" [functions.sh]="$ln_functions"
         [aliases.sh]="$ln_aliases"   [prompt.sh]="$ln_prompt"
+        [help.sh]="$ln_help"
     )
-    for mod in exports.sh history.sh completion.sh init.sh bindings.sh functions.sh aliases.sh prompt.sh; do
+    for mod in exports.sh history.sh completion.sh init.sh bindings.sh functions.sh aliases.sh prompt.sh help.sh; do
         local ln="${module_lines[$mod]}"
         if [[ "$ln" -gt 0 ]]; then
             pass "source ~/.bash/${mod} present (line ${ln})"

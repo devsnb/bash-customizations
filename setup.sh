@@ -600,6 +600,7 @@ _src "$HOME/.bash/bindings.sh"
 _src "$HOME/.bash/functions.sh"
 _src "$HOME/.bash/aliases.sh"
 _src "$HOME/.bash/prompt.sh"
+_src "$HOME/.bash/help.sh"
 
 unset -f _src
 unset _bc_repo

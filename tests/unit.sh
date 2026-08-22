@@ -180,18 +180,121 @@ suite "the reference .bashrc matches what setup.sh injects"
 # .bashrc is documented as usable standalone, so its module list and order must
 # stay identical to the block setup.sh writes into the user's real ~/.bashrc.
 # Nothing else keeps these two copies honest.
-reference_modules=$(grep -oE '_src "\$HOME/\.bash/[a-z]+\.sh"' "${REPO_DIR}/.bashrc" | sed 's/.*bash\///; s/"//')
+reference_modules=$(grep -oE '_src "\$HOME/\.bash/[a-z_-]+\.sh"' "${REPO_DIR}/.bashrc" | sed 's/.*bash\///; s/"//')
 injected_modules=$(sed -n '/^_gen_head_block()/,/^CONTENT$/p' "${REPO_DIR}/setup.sh" \
-    | grep -oE '_src "\$HOME/\.bash/[a-z]+\.sh"' | sed 's/.*bash\///; s/"//')
+    | grep -oE '_src "\$HOME/\.bash/[a-z_-]+\.sh"' | sed 's/.*bash\///; s/"//')
 
 assert_eq "$reference_modules" "$injected_modules" \
     "reference .bashrc sources the same modules, in the same order, as the injected block"
 
 module_count=$(printf '%s\n' "$injected_modules" | grep -c '\.sh')
-assert_eq "8" "$module_count" "all 8 modules are sourced"
+assert_eq "9" "$module_count" "all 9 modules are sourced"
 
 for module in $injected_modules; do
     assert_exists "${REPO_DIR}/bash/${module}" "module ${module} exists in the repo"
 done
+
+# ══════════════════════════════════════════════════════════════════════════════
+suite "bash/help.sh — the cheatsheet parser"
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Hygiene: this file is sourced by EVERY interactive shell ─────────────────
+
+# The load-bearing one.  Sourcing help.sh must do no work at all — if anyone
+# ever moves the parsing to source time, this fails immediately because the
+# sandbox has no awk.
+assert_exit 0 "help.sh sources with no awk on PATH (nothing parses at source time)" \
+    bash --norc -c "PATH='$(sandbox_path "${WORK}/noawk" bash cat)'; source '${REPO_DIR}/bash/help.sh'"
+
+defined=$(bash --norc -c "source '${REPO_DIR}/bash/help.sh'; compgen -A function | grep -E '^(cheatsheet|_bc_)' | sort | tr '\n' ' '")
+assert_eq "_bc_help_parse cheatsheet " "$defined" "help.sh defines exactly two functions"
+
+leaked=$(bash --norc -c "source '${REPO_DIR}/bash/help.sh'; compgen -v | grep -E '^_?[Bb][Cc]_' | tr '\n' ' '")
+assert_eq "" "$leaked" "help.sh leaks no globals into the shell"
+
+# ── Parser semantics, against a fixture covering every awkward shape ─────────
+
+cat > "${WORK}/fx.sh" <<'FIXTURE'
+# ── First section ─────────────────────────────────────────────────────────────
+alias plain='echo hi'          #: a plain entry
+alias noted='echo hi'          # just a note, not a description
+alias -- -='cd -'              #: the dash alias
+alias piped='ps aux | grep -i' #: an expansion containing a pipe
+if command -v eza &>/dev/null; then
+    alias dup='eza'            #: the annotated definition
+else
+    alias dup='ls'
+fi
+alias gated='eza --tree'       #: [eza] only with eza installed
+FIXTURE
+
+cat > "${WORK}/fxfn.sh" <<'FIXTURE'
+# ── Second section ────────────────────────────────────────────────────────────
+# multi <arg> — the first line is the description.
+#
+# Everything below the blank comment is an extended note and must be ignored,
+# including this sentence which contains — an em dash.
+multi() {
+    _nested() { echo "indented helpers must not become entries"; }
+    _nested
+}
+FIXTURE
+
+records=$(bash --norc -c "source '${REPO_DIR}/bash/help.sh'; _bc_help_parse '${WORK}/fx.sh' '${WORK}/fxfn.sh'")
+field() { printf '%s\n' "$records" | awk -F '\t' -v n="$1" -v f="$2" '$3 == n { print $f }'; }
+
+assert_eq "a plain entry"  "$(field plain 6)"  "an annotated alias is parsed"
+assert_eq ""               "$(field noted 6)"  "a plain # comment is a note, not a description"
+assert_eq "cd -"           "$(field - 4)"      "alias -- - is parsed as the name '-'"
+assert_eq "ps aux | grep -i" "$(field piped 4)" "a pipe in the expansion survives intact"
+assert_eq "1" "$(printf '%s\n' "$records" | awk -F '\t' '$3 == "dup"' | wc -l)" \
+    "a name defined in both branches yields exactly one record"
+assert_eq "the annotated definition" "$(field dup 6)" "the annotated definition is the one kept"
+assert_eq "eza" "$(field gated 5)" "a [tool] prefix becomes the requires field"
+assert_eq "only with eza installed" "$(field gated 6)" "…and is stripped from the description"
+assert_eq "First section" "$(field plain 2)" "the section header becomes the group"
+
+assert_eq "<arg>" "$(field multi 4)" "a function's argument spec is parsed"
+assert_eq "the first line is the description" "$(field multi 6)" \
+    "only the first line of a multi-line function comment is used"
+assert_eq "" "$(field _nested 6)" "an indented nested helper is not an entry"
+
+# ── Completeness: an undocumented alias must not be shippable ────────────────
+
+# Deliberately a second, dumber extractor.  If the parser had a bug that dropped
+# entries, comparing it against itself would prove nothing.
+defined_aliases=$(grep -E '^[[:space:]]*alias[[:space:]]' "${REPO_DIR}/bash/aliases.sh" \
+    | sed -E 's/^[[:space:]]*alias[[:space:]]+//; s/^--[[:space:]]+//; s/=.*//' | sort -u)
+documented_aliases=$(bash --norc -c "source '${REPO_DIR}/bash/help.sh'; _bc_help_parse '${REPO_DIR}/bash/aliases.sh'" | cut -f3 | sort -u)
+assert_eq "$defined_aliases" "$documented_aliases" \
+    "every alias in aliases.sh carries a #: description"
+
+annotation_count=$(grep -cE '^[[:space:]]*alias[[:space:]].* #: ' "${REPO_DIR}/bash/aliases.sh")
+assert_eq "$(printf '%s\n' "$documented_aliases" | wc -l)" "$annotation_count" \
+    "no alias name is annotated twice"
+
+# The parser splits on the FIRST ' #: ', so a '#' inside an expansion would
+# truncate it silently.  Forbid that outright rather than handle it.
+# Everything left of the sigil on an annotated line is the definition; a '#'
+# in there means the expansion contains one.  Unannotated lines are skipped so
+# a plain trailing "# BSD/macOS" note stays legal.
+stray_hash=$(grep -E '^[[:space:]]*alias[[:space:]].* #: ' "${REPO_DIR}/bash/aliases.sh" \
+    | sed 's/ #: .*//' | grep '#' || true)
+assert_eq "" "$stray_hash" "no alias expansion contains a literal #"
+
+defined_funcs=$(grep -oE '^[A-Za-z_][A-Za-z0-9_-]*\(\)' "${REPO_DIR}/bash/functions.sh" | sed 's/()//' | sort)
+documented_funcs=$(bash --norc -c "source '${REPO_DIR}/bash/help.sh'; _bc_help_parse '${REPO_DIR}/bash/functions.sh'" | cut -f3 | sort)
+assert_eq "$defined_funcs" "$documented_funcs" \
+    "every function in functions.sh carries a — description"
+
+# ── cheatsheet works from the deployed copy, with no repo present ────────────
+
+mkdir -p "${WORK}/fakebash"
+cp "${REPO_DIR}/bash/aliases.sh" "${REPO_DIR}/bash/functions.sh" "${REPO_DIR}/bash/help.sh" "${WORK}/fakebash/"
+sheet=$(bash --norc -c "source '${WORK}/fakebash/help.sh'; cheatsheet git")
+assert_contains "$sheet" "gds" "cheatsheet resolves its sources as siblings, not via the repo"
+assert_not_contains "$sheet" "dkps" "a filter excludes non-matching entries"
+assert_contains "$(bash --norc -c "source '${WORK}/fakebash/help.sh'; cheatsheet zzzznope")" \
+    "no matches" "an unmatched filter says so instead of printing nothing"
 
 finish
