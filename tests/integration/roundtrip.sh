@@ -19,6 +19,21 @@ if [[ "${ALLOW_HOME_MUTATION:-}" != "yes" ]]; then
     exit 1
 fi
 
+# ALLOW_HOME_MUTATION alone is not enough of a fence.  setup.sh honours
+# XDG_CONFIG_HOME / XDG_DATA_HOME, so running this with only HOME overridden —
+# the obvious way to try it outside a container — deploys starship.toml and the
+# manifest into the *real* config directory and then deletes them again during
+# the uninstall phase.  Refuse unless every XDG path is unset or inside $HOME.
+for _xdg in XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME; do
+    _val="${!_xdg:-}"
+    if [[ -n "$_val" && "$_val" != "${HOME}/"* ]]; then
+        echo "refusing to run: ${_xdg}=${_val} points outside HOME=${HOME}." >&2
+        echo "                 This test would mutate directories it does not own." >&2
+        exit 1
+    fi
+done
+unset _xdg _val
+
 ORIGINAL_BASHRC_MARKER="# ORIGINAL USER BASHRC — must survive a restore"
 PRISTINE="$(mktemp)"
 
@@ -125,6 +140,12 @@ assert_eq "$hash_before" "$(home_hash)" "uninstall.sh --dry-run leaves \$HOME un
 assert_contains "$dry_out" "Would remove" "uninstall --dry-run describes what it would do"
 assert_not_contains "$dry_out" "[OK]    Removed" "uninstall --dry-run never claims it removed anything"
 
+# The assertion above is only meaningful because output is plain when stdout is
+# not a terminal — with colour on, an escape sits between "[OK]" and the padding
+# and the literal string could never match either way.  Prove both halves:
+# that the marker is really absent, and that a real uninstall does print it.
+assert_not_contains "$dry_out" $'\033' "uninstall --dry-run emits no colour when piped"
+
 # ══════════════════════════════════════════════════════════════════════════════
 suite "5. refusing to act without a way to confirm"
 # ══════════════════════════════════════════════════════════════════════════════
@@ -175,7 +196,12 @@ suite "8. plain uninstall (no restore) removes every trace"
 # ══════════════════════════════════════════════════════════════════════════════
 
 assert_exit 0 "re-install for the final case" bash "${REPO_DIR}/setup.sh" --skip-tools
-assert_exit 0 "uninstall --yes succeeds" bash "${REPO_DIR}/uninstall.sh" --yes
+
+real_out=$(bash "${REPO_DIR}/uninstall.sh" --yes 2>&1); real_rc=$?
+assert_eq "0" "$real_rc" "uninstall --yes succeeds"
+# The positive control for suite 4: a real uninstall does print this exact
+# marker, so the dry run's absence of it means something.
+assert_contains "$real_out" "[OK]    Removed" "a real uninstall reports what it removed"
 
 assert_eq "0" "$(count_blocks '# === BEGIN bash-customizations ===')" "HEAD block removed"
 assert_eq "0" "$(count_blocks '# === BEGIN bash-customizations-attach ===')" "TAIL block removed"
