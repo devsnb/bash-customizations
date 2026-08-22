@@ -17,3 +17,9 @@ disable=SC2088
 
 # Note: severity is NOT configurable here — shellcheck only honours it as a
 # command-line flag, so tests/lint.sh passes --severity=warning instead.
+
+# Follow `# shellcheck source=` directives across files.  setup.sh, doctor.sh
+# and uninstall.sh all source lib/log.sh for the palette and glyph variables;
+# without this shellcheck cannot see where GLYPH_OK, RULE_LIGHT and friends are
+# assigned, and reports every use of them as an undefined reference.
+external-sources=true
