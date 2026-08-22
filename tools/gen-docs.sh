@@ -34,11 +34,11 @@ README="${REPO_DIR}/README.md"
 # shellcheck source=../bash/help.sh
 source "${REPO_DIR}/bash/help.sh"
 
-MODE=write
+MODE='write'
 case "${1:-}" in
-    ''|--write) MODE=write ;;
-    --check)    MODE=check ;;
-    --stdout)   MODE=stdout ;;
+    ''|--write) MODE='write' ;;
+    --check)    MODE='check' ;;
+    --stdout)   MODE='stdout' ;;
     -h|--help)
         sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
         exit 0
@@ -118,7 +118,7 @@ trap 'rm -f "$tmp_alias" "$tmp_func" "$tmp_a" "$tmp_b"' EXIT
 printf '%s\n' "$records" | render alias > "$tmp_alias"
 printf '%s\n' "$records" | render func  > "$tmp_func"
 
-if [[ "$MODE" == stdout ]]; then
+if [[ "$MODE" == 'stdout' ]]; then
     cat "$tmp_alias" "$tmp_func"
     exit 0
 fi
@@ -126,7 +126,7 @@ fi
 replace_block "$README" aliases   "$tmp_alias" "$tmp_a"
 replace_block "$tmp_a"  functions "$tmp_func"  "$tmp_b"
 
-if [[ "$MODE" == check ]]; then
+if [[ "$MODE" == 'check' ]]; then
     if cmp -s "$tmp_b" "$README"; then
         echo "docs: README tables are up to date"
     else
