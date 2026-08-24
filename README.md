@@ -780,7 +780,7 @@ the flags the scripts accept — not an API:
 |---|---|
 | **major** | An alias or function was renamed or removed, or a script flag changed. Your muscle memory needs updating; read the changelog. |
 | **minor** | New aliases, functions, flags or modules. Nothing you already type stops working. |
-| **patch** | Fixes only. |
+| **patch** | Fixes, documentation, and internal changes with no user-visible surface. |
 
 Upgrading is safe by design: the managed `~/.bashrc` block is replaced wholesale
 rather than patched, `~/.bashrc` is backed up first whenever that block actually
@@ -805,11 +805,12 @@ make release VERSION=1.1.0            # stamps VERSION, folds Unreleased into a 
 git push --follow-tags origin main    # the only irreversible step
 ```
 
-`make release` refuses on a dirty tree, a branch other than `main`, a version
-that is not newer, an existing tag, an empty `Unreleased` section, or a failing
-`make check` — and it never pushes. The push is what starts CI's release job,
-which runs the full suite against the tag, checks the tag matches `VERSION`, and
-only then publishes the GitHub Release.
+`make release` never pushes, and refuses rather than producing a questionable
+release — a dirty tree, the wrong branch, an existing tag, an empty `Unreleased`
+section, or a failing `make check` all stop it.
+
+**[`docs/RELEASING.md`](docs/RELEASING.md)** is the full guide: what each refusal
+means, what CI does with the tag, and how to recover when something goes wrong.
 
 ---
 

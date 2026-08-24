@@ -10,6 +10,16 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+### Added
+- [`docs/RELEASING.md`](docs/RELEASING.md) — the maintainer's guide to cutting a
+  release: what each of `make release`'s refusals means, what CI does with the
+  tag, and how to recover when something goes wrong.
+
+### Changed
+- The README's release section now points at that guide instead of describing
+  the process a second time, and **patch** is documented as covering
+  documentation and internal changes, not just fixes.
+
 ## [1.0.0] - 2026-08-22
 
 The first tagged release. Everything below already existed on `main`; this entry
