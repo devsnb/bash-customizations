@@ -294,6 +294,12 @@ fi
 # Commit and tag
 # ══════════════════════════════════════════════════════════════════════════════
 
+# mktemp creates 0600 and `mv` carries that mode across with the inode, so
+# without this the two files git tracks as 100644 end up owner-only on disk
+# after every release.  (tools/gen-docs.sh escapes this by using `cp` onto the
+# existing README, which keeps the destination's mode.)
+chmod 644 "$tmp_version" "$tmp_changelog"
+
 mv "$tmp_version"   "$VERSION_FILE"
 mv "$tmp_changelog" "$CHANGELOG"
 trap - EXIT

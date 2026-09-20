@@ -22,6 +22,7 @@
 #  10.  starship.toml: exists at the expected location
 #  11.  History file: exists and is writable
 #  12.  ble.sh + fzf conflict detection
+#  13.  Optional companion tools (advisory — tree, eza, docker, fzf, curl, …)
 #
 # Exit codes:
 #   0  — no failures (warnings may still be present; they are advisory)
@@ -139,6 +140,7 @@ parse_args() {
                 echo "  10  starship.toml exists and is well-formed"
                 echo "  11  History file writable"
                 echo "  12  No fzf --bash conflict alongside ble.sh"
+                echo "  13  Optional companion tools present (advisory)"
                 echo
                 echo "Examples:"
                 echo "  bash doctor.sh                # full check, show all results"
@@ -677,6 +679,60 @@ check_history() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Check: optional companion tools
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Some aliases and functions only work when an optional tool is installed.
+# Nothing here is required — this setup deliberately does not install them for
+# you — but "why does `tree-all` do nothing?" is worth answering before it is
+# asked.  Advisory only: these are warnings, never failures.
+#
+# The list is not maintained here.  It is the `requires` column of the same
+# records `cheatsheet` and the README tables are built from, extracted from the
+# `[tool]` prefixes in bash/aliases.sh and bash/functions.sh.  Annotating a new
+# entry there is all it takes for it to appear here.
+check_optional_tools() {
+    log_section "Optional companion tools"
+
+    local aliases="${REPO_DIR}/bash/aliases.sh"
+    local functions="${REPO_DIR}/bash/functions.sh"
+    local helper="${REPO_DIR}/bash/help.sh"
+
+    if [[ ! -r "$helper" || ! -r "$aliases" || ! -r "$functions" ]]; then
+        info "Skipped — the module sources are not readable from ${REPO_DIR}"
+        return
+    fi
+
+    # help.sh does nothing at source time by design (tests/unit.sh enforces it
+    # by sourcing the file with no awk on PATH), so this only defines the parser.
+    # shellcheck source=bash/help.sh
+    source "$helper"
+
+    local records
+    records="$(_bc_help_parse "$aliases" "$functions")"
+
+    local tool entries missing=0
+    while IFS= read -r tool; do
+        [[ -n "$tool" ]] || continue
+        # Naming the entries that go dark is more use than the bare tool name.
+        entries="$(printf '%s\n' "$records" \
+                   | awk -F '\t' -v t="$tool" '$5 == t { printf "%s ", $3 }')"
+        entries="${entries% }"
+        if command -v "$tool" &>/dev/null; then
+            pass "${tool}: installed  (${entries})"
+        else
+            warn "${tool} is not installed — used by: ${entries}" \
+                 "Optional. Install it with your package manager if you want them."
+            (( missing++ )) || true
+        fi
+    done < <(printf '%s\n' "$records" | awk -F '\t' '$5 != "" { print $5 }' | sort -u)
+
+    if [[ "$missing" -eq 0 ]]; then
+        info "Every optional companion is present."
+    fi
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -730,6 +786,7 @@ main() {
     check_bashrc
     check_starship_toml
     check_history
+    check_optional_tools
 
     print_summary
 

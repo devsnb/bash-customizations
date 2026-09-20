@@ -15,7 +15,7 @@ PRUNE_ARG := $(if $(KEEP),--prune-backups=$(KEEP),--prune-backups)
 
 .PHONY: help install dotfiles update update-tools version dry-run doctor doctor-quiet \
         uninstall uninstall-dry restore restore-only purge-tools \
-        list-backups prune-backups lint docs docs-check \
+        list-backups prune-backups lint docs docs-check tools-lock tools-update tools-outdated \
         test test-unit test-docker check release release-dry
 
 ##@ General
@@ -51,7 +51,7 @@ update: ## Fetch the newest release, then re-install tools and dotfiles
 	@git -C $(REPO_DIR) pull --ff-only
 	@bash $(REPO_DIR)/setup.sh --force
 
-update-tools: ## Upgrade the installed tools only, without fetching a new release
+update-tools: ## Reinstall the tool versions pinned by this checkout
 	@bash $(REPO_DIR)/setup.sh --force
 
 dry-run: ## Preview what install would do without making any changes
@@ -107,6 +107,15 @@ docs: ## Regenerate the README alias/function tables from bash/*.sh
 
 docs-check: ## Fail if those tables are stale (fix with: make docs)
 	@bash $(REPO_DIR)/tools/gen-docs.sh --check
+
+tools-lock: ## Re-download and verify every version currently in tools.lock
+	@bash $(REPO_DIR)/tools/lock-tools.sh
+
+tools-update: ## Pin every managed tool to its newest published release
+	@bash $(REPO_DIR)/tools/lock-tools.sh --latest
+
+tools-outdated: ## Report whether newer managed-tool releases are available
+	@bash $(REPO_DIR)/tools/lock-tools.sh --check
 
 test-unit: ## Run the unit tests (no container required)
 	@bash $(REPO_DIR)/tests/unit.sh

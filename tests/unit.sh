@@ -96,6 +96,43 @@ out=$(
 )
 assert_not_contains "$out" "requires" "a failing extraction is not reported as a missing tool"
 
+# The common formats used to be the UNguarded ones: `extract x.rar` coached you
+# while `extract x.zip` died with a bare "unzip: command not found".  unzip,
+# xz-utils and bzip2 are all absent from a minimal Debian install, so these are
+# the branches most likely to be hit on a fresh machine.
+BARE="$(sandbox_path "${WORK}/bare" bash)"
+for fmt in zip:unzip bz2:bunzip2 xz:unxz gz:gunzip; do
+    ext="${fmt%%:*}"; tool="${fmt##*:}"
+    touch "${WORK}/sample.${ext}"
+    out=$(
+        source "${REPO_DIR}/bash/functions.sh"
+        PATH="${BARE}"
+        extract "${WORK}/sample.${ext}" 2>&1
+    )
+    assert_contains "$out" "requires '${tool}'" "extract names ${tool} for a .${ext}"
+done
+
+# GNU tar shells out to the compressor, so a box with tar but no bzip2 fails
+# inside tar with a message that never mentions bzip2.  Name it ourselves.
+TARONLY="$(sandbox_path "${WORK}/tar-only" bash tar)"
+touch "${WORK}/sample.tar.bz2"
+out=$(
+    source "${REPO_DIR}/bash/functions.sh"
+    PATH="${TARONLY}"
+    extract "${WORK}/sample.tar.bz2" 2>&1
+)
+assert_contains "$out" "requires 'bzip2'" "extract names the compressor tar would have shelled out to"
+
+# _need is defined inside extract and must not survive it — including on the
+# failure paths, which used to `return` straight past the unset.
+leaked=$(
+    source "${REPO_DIR}/bash/functions.sh"
+    PATH="${BARE}"
+    extract "${WORK}/sample.zip" >/dev/null 2>&1
+    declare -F _need >/dev/null && echo leaked
+)
+assert_eq "" "$leaked" "extract does not leak _need into the shell after a guard fails"
+
 # ══════════════════════════════════════════════════════════════════════════════
 suite "bash/functions.sh — myip / port / fkill"
 # ══════════════════════════════════════════════════════════════════════════════
@@ -167,6 +204,9 @@ for script in setup.sh doctor.sh uninstall.sh; do
         "--version" "${script} --help documents --version"
 done
 
+assert_exit 1 "setup.sh rejects the unverified legacy --latest path" \
+    bash "${REPO_DIR}/setup.sh" --latest
+
 # Everything downstream does `cat VERSION`; a stray second line would poison the
 # tag comparison in CI with an error nobody could read.
 assert_eq "1" "$(wc -l < "${REPO_DIR}/VERSION" | tr -d ' ')" \
@@ -217,8 +257,8 @@ fi
 
 out=$(bash "${REPO_DIR}/doctor.sh" --help 2>&1)
 assert_contains "$out" "warnings are advisory" "doctor --help documents its exit codes"
-assert_contains "$out" "  12  " "doctor --help lists all 12 checks"
-assert_not_contains "$out" "  13  " "doctor --help has no stale 13th check"
+assert_contains "$out" "  13  " "doctor --help lists all 13 checks"
+assert_not_contains "$out" "  14  " "doctor --help has no stale 14th check"
 
 out=$(bash "${REPO_DIR}/uninstall.sh" --help 2>&1)
 for flag in "--yes" "--restore-only" "--prune-backups" "--delete-backup" "--list-backups"; do
@@ -227,6 +267,136 @@ done
 
 out=$(bash "${REPO_DIR}/uninstall.sh" --prune-backups=abc 2>&1 || true)
 assert_contains "$out" "expects a number" "uninstall validates --prune-backups=N"
+
+# ═════════════════════════════════════════════════════════════════════════════
+suite "tools.lock — completeness, platforms and verification"
+# ═════════════════════════════════════════════════════════════════════════════
+
+# shellcheck source=lib/tools.sh
+source "${REPO_DIR}/lib/tools.sh"
+
+assert_exit 0 "the committed lock contains every required version and hash" \
+    bash -c "source '${REPO_DIR}/lib/tools.sh'; bc_tools_validate"
+
+grep -v '^FZF_SHA256_linux_x86_64=' "${REPO_DIR}/tools.lock" > "${WORK}/incomplete.lock"
+assert_exit 1 "lock validation rejects a missing platform hash" \
+    bash -c "source '${REPO_DIR}/lib/tools.sh'; bc_tools_load '${WORK}/incomplete.lock'; bc_tools_validate"
+
+assert_eq "4" "$(grep -cE '^[A-Z]+_VERSION=' "${REPO_DIR}/tools.lock")" \
+    "the lock has one version for every managed tool"
+assert_eq "13" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${REPO_DIR}/tools.lock")" \
+    "the lock has all twelve binary hashes plus the architecture-independent ble.sh hash"
+
+for tool in "${BC_MANAGED_TOOLS[@]}"; do
+    version="$(bc_tool_version "$tool")"
+    if [[ "$tool" == blesh ]]; then
+        platforms=(any)
+    else
+        platforms=("${BC_TOOL_PLATFORMS[@]}")
+    fi
+    for platform in "${platforms[@]}"; do
+        url="$(bc_tool_url "$tool" "$platform" "$version")"
+        assert_contains "$url" "https://github.com/" \
+            "${tool}/${platform} resolves to a GitHub release asset"
+    done
+done
+
+# Exercise the platform normalisation without depending on the CI host.
+mkdir -p "${WORK}/fake-uname"
+cat > "${WORK}/fake-uname/uname" <<'UNAME'
+#!/usr/bin/env bash
+case "$1" in
+    -s) echo Darwin ;;
+    -m) echo arm64 ;;
+    *) exit 1 ;;
+esac
+UNAME
+chmod +x "${WORK}/fake-uname/uname"
+assert_eq "darwin_aarch64" "$(PATH="${WORK}/fake-uname:${PATH}" bc_tool_platform)" \
+    "Darwin arm64 is normalised to the lock's platform name"
+assert_eq "aarch64-apple-darwin" "$(_bc_tool_triple zoxide darwin_aarch64)" \
+    "the zoxide asset triple matches Darwin arm64"
+
+# setup.sh is sourceable for focused tests but runs main only when executed.
+# Stub the downloader so these assertions need no network.
+printf 'wanted bytes' > "${WORK}/wanted-bytes"
+wanted_sha="$(bc_sha256 "${WORK}/wanted-bytes")"
+mismatch=$(
+    source "${REPO_DIR}/setup.sh"
+    trap - ERR
+    download() { printf 'wrong bytes'; }
+    BC_TOOLS[FZF_SHA256_linux_x86_64]="$wanted_sha"
+    blob="${WORK}/checksum-mismatch"
+    if fetch_verified fzf linux_x86_64 "$(bc_tool_version fzf)" "$blob" >/dev/null 2>&1; then
+        echo accepted
+    elif [[ -e "$blob" ]]; then
+        echo rejected-but-left-file
+    else
+        echo rejected-and-removed
+    fi
+)
+assert_eq "rejected-and-removed" "$mismatch" \
+    "a checksum mismatch is rejected and its downloaded file is removed"
+
+printf 'verified bytes' > "${WORK}/verified-bytes"
+verified_sha="$(bc_sha256 "${WORK}/verified-bytes")"
+verified=$(
+    source "${REPO_DIR}/setup.sh"
+    trap - ERR
+    payload='verified bytes'
+    download() { printf '%s' "$payload"; }
+    BC_TOOLS[FZF_SHA256_linux_x86_64]="$verified_sha"
+    blob="${WORK}/checksum-match"
+    if fetch_verified fzf linux_x86_64 "$(bc_tool_version fzf)" "$blob" >/dev/null 2>&1 \
+       && [[ "$(cat "$blob")" == "$payload" ]]; then
+        echo verified
+    else
+        echo failed
+    fi
+)
+assert_eq "verified" "$verified" "matching bytes pass checksum verification"
+
+# Reproduce the dangerous partial-update case in a throwaway mini-repository.
+# The named tool is the only version selected to move, but the rewritten lock
+# must retain and re-hash every other tool as well.
+LOCK_REPO="${WORK}/lock-repo"
+mkdir -p "${LOCK_REPO}/lib" "${LOCK_REPO}/tools" "${LOCK_REPO}/stub-bin"
+cp "${REPO_DIR}/lib/log.sh" "${REPO_DIR}/lib/tools.sh" "${LOCK_REPO}/lib/"
+cp "${REPO_DIR}/tools.lock" "${LOCK_REPO}/tools.lock"
+cp "${REPO_DIR}/tools/lock-tools.sh" "${LOCK_REPO}/tools/lock-tools.sh"
+cat > "${LOCK_REPO}/stub-bin/curl" <<'CURL'
+#!/usr/bin/env bash
+url=''; output=''
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o) shift; output="$1" ;;
+        https://*) url="$1" ;;
+    esac
+    shift
+done
+[[ -n "$url" ]] || exit 1
+if [[ -n "$output" ]]; then
+    printf '%s\n' "$url" > "$output"
+else
+    printf '{"tag_name":"v99.0.0"}\n'
+fi
+CURL
+chmod +x "${LOCK_REPO}/stub-bin/curl"
+
+assert_exit 0 "a named lock refresh completes in the throwaway repository" \
+    env PATH="${LOCK_REPO}/stub-bin:${PATH}" bash "${LOCK_REPO}/tools/lock-tools.sh" --latest fzf
+assert_exit 0 "a named lock refresh preserves a complete, valid lock" \
+    bash -c "source '${LOCK_REPO}/lib/tools.sh'; bc_tools_validate"
+assert_file_contains "${LOCK_REPO}/tools.lock" "FZF_VERSION=99.0.0" \
+    "a named update advances the selected tool"
+assert_eq "4" "$(grep -cE '^[A-Z]+_VERSION=' "${LOCK_REPO}/tools.lock")" \
+    "a named lock refresh does not drop unselected tool versions"
+assert_eq "13" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${LOCK_REPO}/tools.lock")" \
+    "a named lock refresh does not drop unselected platform hashes"
+
+for target in tools-lock tools-update tools-outdated; do
+    assert_exit 0 "make ${target} is wired" make -s -n -C "$REPO_DIR" "$target"
+done
 
 # ══════════════════════════════════════════════════════════════════════════════
 suite "the reference .bashrc matches what setup.sh injects"

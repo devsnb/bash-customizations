@@ -1,0 +1,17 @@
+# Temp files written into the repo root by the tooling.  Both tools/release.sh
+# and tools/gen-docs.sh mktemp beside their target so the final write is a
+# rename on the same filesystem; an aborted run is what leaves these behind.
+/.VERSION.*
+/.CHANGELOG.*
+/.gen-alias.*
+/.gen-func.*
+/.README.*
+/.tools.lock.*
+
+# Claude Code session state (resume checkpoints, local settings).
+/.claude/
+
+# Editor and OS scratch.
+*.swp
+*~
+.DS_Store

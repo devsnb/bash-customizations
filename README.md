@@ -62,17 +62,18 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 
 ## Tools
 
-| Tool | Minimum | Purpose |
+| Tool | Installed from | Purpose |
 |---|---|---|
-| [starship](https://starship.rs) | v1.25.1 | Cross-shell prompt with git, language, and time info |
-| [ble.sh](https://github.com/akinomyoga/ble.sh) | nightly | Syntax highlighting, smart completion, auto-suggestions |
-| [bash-completion](https://github.com/scop/bash-completion) | v2.17.0 | Tab-completion ecosystem for hundreds of CLI tools |
-| [fzf](https://github.com/junegunn/fzf) | v0.62.0 | Fuzzy file finder — CTRL-T, CTRL-R, ALT-C |
-| [zoxide](https://github.com/ajeetdsouza/zoxide) | v0.9.9 | Frecency-ranked directory jumper (`z`, `zi`) |
+| [starship](https://starship.rs) | pinned release asset | Cross-shell prompt with git, language, and time info |
+| [ble.sh](https://github.com/akinomyoga/ble.sh) | pinned dated nightly | Syntax highlighting, smart completion, auto-suggestions |
+| [bash-completion](https://github.com/scop/bash-completion) | system package manager | Tab-completion ecosystem for hundreds of CLI tools |
+| [fzf](https://github.com/junegunn/fzf) | pinned release asset | Fuzzy file finder — CTRL-T, CTRL-R, ALT-C |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | pinned release asset | Frecency-ranked directory jumper (`z`, `zi`) |
 
-> Nothing is pinned: `setup.sh` installs the current release of each tool, so what
-> you get will usually be newer than the minimum above. Run `bash doctor.sh` to see
-> the versions actually installed on your system.
+The exact versions and SHA-256 hashes are committed in [`tools.lock`](tools.lock).
+`setup.sh` refuses a missing, malformed, or mismatched hash, so separate machines
+using the same checkout install the same bytes. Run `bash doctor.sh` to see the
+versions actually installed on your system.
 
 ---
 
@@ -92,7 +93,8 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 |---|---|---|
 | Bash ≥ 4.2 | associative arrays, `[[ ]]` features | `bash --version` |
 | `curl` or `wget` | downloading tools | `command -v curl` |
-| `git` | fzf install | `command -v git` |
+| `tar`, `gzip`, `xz` | unpacking verified release archives | `command -v tar gzip xz` |
+| `git` *(optional)* | only for `make update` | `command -v git` |
 | **en_US.UTF-8 locale** | **ble.sh needs it — missing locale causes garbage in prompt** | `locale -a \| grep en_US` |
 | `make` *(optional)* | only for the `make` targets below — `bash setup.sh` does the same job | `command -v make` |
 
@@ -135,7 +137,7 @@ Run `make` (or `make help`) to see all available targets:
 | `make install` | Install all tools + deploy dotfiles |
 | `make dotfiles` | Deploy dotfiles only (tools already installed) |
 | `make update` | Fetch the newest release, then re-install tools and dotfiles |
-| `make update-tools` | Upgrade the installed tools only, without fetching a new release |
+| `make update-tools` | Reinstall the tool versions pinned by this checkout |
 | `make version` | Show this checkout's version and the one currently installed |
 | `make dry-run` | Preview what install would do without making changes |
 | `make doctor` | Diagnose the setup and show fix instructions |
@@ -150,6 +152,9 @@ Run `make` (or `make help`) to see all available targets:
 | `make lint` | `bash -n` + shellcheck every script |
 | `make docs` | Regenerate the README alias/function tables from `bash/*.sh` |
 | `make docs-check` | Fail if those tables are stale |
+| `make tools-outdated` | Check whether newer managed-tool releases exist |
+| `make tools-lock` | Re-download and verify the versions already in `tools.lock` |
+| `make tools-update` | Pin and hash the newest release of every managed tool |
 | `make test-unit` | Module behaviour and argument handling — no container needed |
 | `make test-docker` | The full install → doctor → uninstall → restore round trip |
 | `make test` | Unit tests + the container round trip |
@@ -198,7 +203,11 @@ You can also invoke the scripts directly if you prefer:
 | `-V`, `--version` | Print the version and exit |
 | `-h`, `--help` | Print usage, the check list, and exit codes |
 
-To move to the newest release, run `make update` — it fetches, then re-installs. To upgrade only the installed tools without changing release, use `make update-tools` (or `bash setup.sh --force`). See [Updating tools](#updating-tools).
+To move to the newest release of this repository, run `make update` — it fetches
+the checkout and then installs the versions pinned by that release. To reinstall
+this checkout's pinned tools, use `make update-tools` (or `bash setup.sh --force`).
+Maintainers can advance the pins with `make tools-update`; see
+[Updating tools](#updating-tools).
 
 ---
 
@@ -268,6 +277,7 @@ predates the install — are advisory and never change the exit code, so
 | 10 | `starship.toml` exists and is well-formed |
 | 11 | History file is writable |
 | 12 | No `fzf --bash` conflict alongside ble.sh |
+| 13 | Optional companion tools used by aliases/functions are available *(advisory)* |
 
 ---
 
@@ -467,6 +477,7 @@ Generated from the `# name — description` comments in [`bash/functions.sh`](ba
 | Function | Description |
 |---|---|
 | `port <number>` | show what process is listening on a given port |
+| `ports` | list every listening port and the process behind it |
 
 #### Text / search
 
@@ -478,28 +489,28 @@ Generated from the `# name — description` comments in [`bash/functions.sh`](ba
 
 | Function | Description |
 |---|---|
-| `fcd [dir]` | fuzzy cd: interactively pick a directory with fzf |
-| `fkill [-s SIGNAL] [filter]` | interactively pick a process and kill it |
+| `fcd [dir]` | fuzzy cd: interactively pick a directory with fzf *(requires `fzf`)* |
+| `fkill [-s SIGNAL] [filter]` | interactively pick a process and kill it *(requires `fzf`)* |
 
 #### Network
 
 | Function | Description |
 |---|---|
-| `myip` | show public and local IP addresses |
+| `myip` | show public and local IP addresses *(requires `curl`)* |
 
 #### Development
 
 | Function | Description |
 |---|---|
-| `serve [port]` | start a simple HTTP server in the current directory |
+| `serve [port]` | start a simple HTTP server in the current directory *(requires `python3`)* |
 
 #### Miscellaneous
 
 | Function | Description |
 |---|---|
 | `reload` | re-source ~/.bashrc without starting a new shell |
-| `tree-all [path]` | tree with hidden files, colours, and pager |
-| `weather [location]` | quick weather report for a location |
+| `tree-all [path]` | tree with hidden files, colours, and pager *(requires `tree`)* |
+| `weather [location]` | quick weather report for a location *(requires `curl`)* |
 <!-- END GENERATED: functions -->
 
 ### `aliases.sh`
@@ -567,7 +578,6 @@ Generated from the ` #: ` descriptions in [`bash/aliases.sh`](bash/aliases.sh) �
 | Alias | Expands to | Description |
 |---|---|---|
 | `ping` | `ping -c 5` | ping, stopping after five packets |
-| `ports` | `ss -tulpn` | every listening port and the process behind it |
 
 #### Editor
 
@@ -696,25 +706,25 @@ For a personal addition that doesn't require touching `setup.sh`, skip step 2 an
 
 ## Updating tools
 
-`make update` does the whole job: `git pull --ff-only` for the newest release,
-then a full re-install. Use it after a release you want.
+`make update` pulls the newest repository release and reinstalls the versions that
+release pins. `make update-tools` leaves the checkout unchanged and reinstalls its
+current pins. Re-running `bash setup.sh` without `--force` skips tools already on
+`PATH`.
 
-To upgrade only the tools, leaving this checkout where it is, use
-`make update-tools`. Re-running `bash setup.sh` on its own skips tools that are
-already installed; `--force` is what upgrades them:
+Maintainers update the lock in a reviewable step:
 
-```/dev/null/update.sh#L1-8
-# Upgrade everything
-bash setup.sh --force
-
-# Upgrade individual tools manually:
-#   starship  — curl -sS https://starship.rs/install.sh | sh
-#   fzf       — git -C ~/.fzf pull && ~/.fzf/install --all --no-bash --no-zsh --no-fish
-#   zoxide    — curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
-#   ble.sh    — bash setup.sh --force  (re-downloads the nightly tarball)
+```sh
+make tools-outdated                         # report available updates
+make tools-update                           # update and hash every tool
+bash tools/lock-tools.sh --latest fzf       # or update one pin, preserving the rest
+git diff -- tools.lock                      # review versions and hashes
+make update-tools                           # install exactly those reviewed bytes
 ```
 
-After upgrading, open a new terminal and run `bash doctor.sh` to verify everything is consistent.
+`make tools-lock` re-downloads the versions already pinned and recomputes every
+hash. The lock is replaced only after all platform assets download successfully.
+After installing, open a new terminal and run `bash doctor.sh` to verify everything
+is consistent.
 
 ---
 

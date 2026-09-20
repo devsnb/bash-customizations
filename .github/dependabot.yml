@@ -1,0 +1,25 @@
+# Dependabot keeps the workflow's action versions current.
+#
+# GitHub Actions is the only ecosystem here — the shell tools setup.sh installs
+# are pinned in tools.lock, which Dependabot has no updater for; `make
+# tools-outdated` is what checks those.
+#
+# Free on every plan, and on a public repository the Actions minutes it uses
+# are unlimited.  Monthly rather than weekly: action releases are infrequent and
+# a quieter PR queue is likelier to actually get reviewed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      # Match the repo's existing commit style: lowercase, imperative, no prefix.
+      prefix: ""
+    labels:
+      - dependencies
+    groups:
+      # One PR for all of them; these bumps are reviewed together or not at all.
+      actions:
+        patterns:
+          - "*"

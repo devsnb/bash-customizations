@@ -72,12 +72,20 @@ alias du-dirs='du -d1 -h'    #: size of each subdirectory below here
 alias du-files='du -sh *'    #: size of each entry in this directory
 
 # ── Processes ─────────────────────────────────────────────────────────────────
-alias psa='ps auxf'                            #: every process, as a tree
+# `f` (ASCII-art forest) is GNU procps only — BSD ps on macOS rejects it and
+# prints usage instead of a process list.  Only the GNU branch is annotated;
+# both define the same name.
+if [[ "$OSTYPE" == darwin* ]]; then
+    alias psa='ps aux'
+else
+    alias psa='ps auxf'                        #: every process, as a tree
+fi
 alias psg='ps aux | grep -v grep | grep -i'    #: search the process list, e.g. psg nginx
 
 # ── Network ───────────────────────────────────────────────────────────────────
 alias ping='ping -c 5'    #: ping, stopping after five packets
-alias ports='ss -tulpn'   #: every listening port and the process behind it
+# `ports` is a function in functions.sh — ss does not exist on macOS, so it
+# needs the same ss/lsof fallback that `port` already has.
 
 # ── Editor ────────────────────────────────────────────────────────────────────
 # No `vi` alias here on purpose: it shadows /usr/bin/vi, so `vi file` would open

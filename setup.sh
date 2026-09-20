@@ -4,7 +4,7 @@
 # Idempotent setup script for the bash-customizations dotfile repo.
 #
 # What it does (in order):
-#   1. Checks prerequisites (Bash ≥ 4.2, curl/wget, git)
+#   1. Checks prerequisites (Bash ≥ 4.2, curl/wget, tar, gzip, xz)
 #   1.5. Ensures en_US.UTF-8 locale is installed (required by ble.sh)
 #   2. Installs: starship · ble.sh · bash-completion · fzf · zoxide
 #   3. Deploys dotfiles (.bashrc · .bash/ · .blerc · starship.toml)
@@ -19,12 +19,8 @@
 # Re-running is safe — already-installed tools and already-deployed files are
 # detected and skipped, unless --force is passed.
 #
-# Tool versions installed:
-#   starship        v1.25.1
-#   ble.sh          nightly (0.4.0-devel3+)
-#   bash-completion v2.17.0
-#   fzf             v0.62.0  (latest via git)
-#   zoxide          v0.9.9
+# Tool versions are read from tools.lock and verified by SHA256 before install.
+# bash-completion is the exception: it comes from the system package manager.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -74,8 +70,10 @@ FORCE=false
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Palette, glyphs, log_* and has() are shared with doctor.sh and uninstall.sh.
-if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" ]]; then
-    echo "setup.sh: cannot find ${REPO_DIR}/lib/log.sh and lib/version.sh" >&2
+if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" \
+   || ! -f "${REPO_DIR}/lib/tools.sh" || ! -f "${REPO_DIR}/tools.lock" ]]; then
+    echo "setup.sh: required files are missing from ${REPO_DIR}" >&2
+    echo "          Expected lib/log.sh, lib/version.sh, lib/tools.sh and tools.lock." >&2
     echo "          The repository looks incomplete — re-clone it and try again." >&2
     exit 1
 fi
@@ -83,6 +81,8 @@ fi
 source "${REPO_DIR}/lib/log.sh"
 # shellcheck source=lib/version.sh
 source "${REPO_DIR}/lib/version.sh"
+# shellcheck source=lib/tools.sh
+source "${REPO_DIR}/lib/tools.sh"
 
 # run CMD [args…] — execute or just print in dry-run mode.
 run() {
@@ -262,6 +262,56 @@ download() {
     fi
 }
 
+# fetch_verified TOOL PLATFORM VERSION DEST — download a pinned asset, or fail.
+#
+# The whole point of tools.lock: nothing reaches ~/.local/bin without matching a
+# hash committed to this repo.  A mismatch is fatal and the partial file is
+# removed — "it downloaded something, close enough" is how a corrupted binary
+# or a swapped release becomes your login shell.
+#
+fetch_verified() {
+    local tool="$1" platform="$2" version="$3" dest="$4"
+    local url want got
+
+    url="$(bc_tool_url "$tool" "$platform" "$version")" || {
+        log_error "${tool}: no download URL for platform '${platform}'."
+        return 1
+    }
+
+    if ! download "$url" > "$dest"; then
+        log_error "${tool}: download failed — ${url}"
+        rm -f "$dest"
+        return 1
+    fi
+
+    want="$(bc_tool_sha "$tool" "$platform")" || {
+        log_error "${tool}: tools.lock has no SHA256 for ${platform}."
+        log_error "  Add it with:  bash tools/lock-tools.sh ${tool}"
+        rm -f "$dest"
+        return 1
+    }
+    got="$(bc_sha256 "$dest")" || {
+        log_error "Cannot compute SHA256 — need sha256sum (coreutils) or shasum."
+        rm -f "$dest"
+        return 1
+    }
+    if [[ "$got" != "$want" ]]; then
+        log_error "${tool}: CHECKSUM MISMATCH — refusing to install."
+        log_error "  url      ${url}"
+        log_error "  expected ${want}"
+        log_error "  received ${got}"
+        log_error "  Either the release was re-published or the download was tampered with."
+        rm -f "$dest"
+        return 1
+    fi
+    log_ok "${tool}: sha256 verified (${got:0:16}…)"
+}
+
+# tool_version TOOL — the version pinned in tools.lock.
+tool_version() {
+    bc_tool_version "$1"
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Parse CLI arguments
 # ══════════════════════════════════════════════════════════════════════════════
@@ -307,6 +357,12 @@ parse_args() {
 check_prerequisites() {
     log_section "Checking prerequisites"
 
+    if ! bc_tools_validate; then
+        log_error "tools.lock is incomplete or malformed; refusing to download tools."
+        log_error "  Restore it from git or regenerate it with: make tools-update"
+        exit 1
+    fi
+
     # Bash version ≥ 4.2
     local bash_major="${BASH_VERSINFO[0]}" bash_minor="${BASH_VERSINFO[1]}"
     if (( bash_major < 4 || ( bash_major == 4 && bash_minor < 2 ) )); then
@@ -324,23 +380,29 @@ check_prerequisites() {
     if has curl; then log_ok "curl $(curl --version 2>/dev/null | head -1)"; fi
     if has wget; then log_ok "wget $(wget --version 2>/dev/null | head -1)"; fi
 
-    # git (needed for fzf install via git)
+    # git is useful for updating this checkout, but tool installation no longer
+    # depends on it: every user-local binary comes from a pinned release asset.
     if ! has git; then
-        log_warn "git not found — fzf will be installed via package manager if possible."
+        log_warn "git not found — setup works, but 'make update' will not."
     else
         log_ok "git $(git --version)"
     fi
 
-    # tar + xz — ble.sh ships as a .tar.xz and is unpacked with `tar -xJf`.
+    # tar + gzip + xz unpack the verified release archives.
     # Without these the failure surfaces late and cryptically, mid-download.
     if ! has tar; then
         log_error "tar is required to unpack ble.sh."
         exit 1
     fi
     log_ok "tar $(tar --version 2>/dev/null | head -1)"
+    if ! has gzip; then
+        log_error "gzip is required to unpack starship, fzf and zoxide."
+        exit 1
+    fi
     if ! has xz; then
-        log_warn "xz not found — ble.sh (.tar.xz) cannot be unpacked."
-        log_warn "  Debian/Ubuntu: sudo apt-get install -y xz-utils"
+        log_error "xz is required to unpack ble.sh (.tar.xz)."
+        log_error "  Debian/Ubuntu: sudo apt-get install -y xz-utils"
+        exit 1
     fi
 
     # Say up front that some steps need root, rather than surprising the user
@@ -384,26 +446,49 @@ check_prerequisites() {
 
 # ── Starship ──────────────────────────────────────────────────────────────────
 install_starship() {
-    log_section "Starship (v1.25.1+)"
+    local version; version="$(tool_version starship)" || {
+        log_error "starship: no version available (tools.lock unreadable?)"; return 1; }
+    log_section "Starship ${version}"
 
     if has starship && ! $FORCE; then
         log_ok "Starship already installed: $(ver starship)"
         return 0
     fi
 
-    log_info "Installing Starship to ${LOCAL_BIN}…"
+    local platform; platform="$(bc_tool_platform)" || {
+        log_error "starship: unsupported platform $(uname -s)/$(uname -m)"
+        log_error "  Install it manually: https://starship.rs/guide/#installation"
+        return 1
+    }
+
     if $DRY_RUN; then
-        log_dry "curl -sS https://starship.rs/install.sh | sh -s -- --bin-dir ${LOCAL_BIN} --yes"
-    else
-        download https://starship.rs/install.sh \
-            | sh -s -- --bin-dir "${LOCAL_BIN}" --yes
+        log_dry "download $(bc_tool_url starship "$platform" "$version")"
+        log_dry "verify sha256, then extract 'starship' into ${LOCAL_BIN}"
+        return 0
     fi
-    if has starship; then log_ok "Starship installed: $(ver starship)"; fi
+
+    log_info "Installing Starship ${version} to ${LOCAL_BIN}…"
+    local blob; blob="$(mktemp)"
+    if ! fetch_verified starship "$platform" "$version" "$blob"; then
+        rm -f "$blob"; return 1
+    fi
+    # The tarball is a single top-level `starship` binary.
+    mkdir -p "$LOCAL_BIN"
+    if tar -xzf "$blob" -C "$LOCAL_BIN" starship; then
+        chmod +x "${LOCAL_BIN}/starship"
+        log_ok "Starship installed: $(ver starship)"
+    else
+        log_error "starship: could not unpack the archive"
+        rm -f "$blob"; return 1
+    fi
+    rm -f "$blob"
 }
 
 # ── ble.sh ────────────────────────────────────────────────────────────────────
 install_blesh() {
-    log_section "ble.sh (nightly)"
+    local version; version="$(tool_version blesh)" || {
+        log_error "ble.sh: no version available (tools.lock unreadable?)"; return 1; }
+    log_section "ble.sh ${version}"
 
     local blesh_dir="${XDG_DATA_HOME}/blesh"
 
@@ -412,28 +497,38 @@ install_blesh() {
         return 0
     fi
 
-    log_info "Installing ble.sh nightly to ${blesh_dir}…"
     if $DRY_RUN; then
-        log_dry "curl -L https://github.com/akinomyoga/ble.sh/releases/download/nightly/ble-nightly.tar.xz | tar xJf - -C /tmp && bash /tmp/ble-nightly/ble.sh --install ${XDG_DATA_HOME}"
+        log_dry "download $(bc_tool_url blesh any "$version")"
+        log_dry "verify sha256, then: bash ble.sh --install ${XDG_DATA_HOME}"
         return 0
     fi
 
-    local tmp_dir
+    log_info "Installing ble.sh ${version} to ${blesh_dir}…"
+
+    local blob tmp_dir
+    blob="$(mktemp)"
     tmp_dir="$(mktemp -d)"
-    # Inline cleanup: explicitly remove on success AND on failure.
-    # We don't use a RETURN trap because bash's set -e bypasses RETURN traps
-    # (it triggers an ERR trap then exits the script entirely, not a return).
+    # Inline cleanup rather than a RETURN trap: bash's set -e bypasses RETURN
+    # traps (it fires ERR and exits the script outright, never returning).
     local blesh_ok=false
-    if download "https://github.com/akinomyoga/ble.sh/releases/download/nightly/ble-nightly.tar.xz" \
-            | tar -xJf - -C "$tmp_dir" \
-        && bash "${tmp_dir}/ble-nightly/ble.sh" --install "${XDG_DATA_HOME}"; then
-        blesh_ok=true
+    if fetch_verified blesh any "$version" "$blob" \
+        && tar -xJf "$blob" -C "$tmp_dir"; then
+        # A dated nightly unpacks to ble-nightly-<date>+<sha>/, not ble-nightly/,
+        # so glob for the installer rather than assuming the directory name.
+        local installer
+        installer="$(find "$tmp_dir" -maxdepth 2 -name 'ble.sh' -type f | head -1)"
+        if [[ -n "$installer" ]] && bash "$installer" --install "${XDG_DATA_HOME}"; then
+            blesh_ok=true
+        else
+            log_error "ble.sh: no ble.sh found in the unpacked archive"
+        fi
     fi
-    rm -rf "$tmp_dir"
+    rm -rf "$tmp_dir" "$blob"
+
     if $blesh_ok; then
         log_ok "ble.sh installed at ${blesh_dir}"
     else
-        log_error "ble.sh installation failed (download or install step returned non-zero)"
+        log_error "ble.sh installation failed (download, checksum or install step)"
         return 1
     fi
 }
@@ -506,107 +601,88 @@ install_bash_completion() {
 
 # ── fzf ───────────────────────────────────────────────────────────────────────
 install_fzf() {
-    log_section "fzf (v0.62.0+)"
+    local version; version="$(tool_version fzf)" || {
+        log_error "fzf: no version available (tools.lock unreadable?)"; return 1; }
+    log_section "fzf ${version}"
 
     if has fzf && ! $FORCE; then
         log_ok "fzf already installed: $(ver fzf)"
         return 0
     fi
 
-    log_info "Installing fzf…"
+    local platform; platform="$(bc_tool_platform)" || {
+        log_error "fzf: unsupported platform $(uname -s)/$(uname -m)"
+        log_error "  Install it manually: https://github.com/junegunn/fzf/releases"
+        return 1
+    }
 
     if $DRY_RUN; then
-        if [[ -d "${HOME}/.fzf" ]]; then
-            log_dry "git -C ~/.fzf pull --ff-only"
-        else
-            log_dry "git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf"
-        fi
-        log_dry "~/.fzf/install --all --no-bash --no-zsh --no-fish"
-        log_dry "ln -sf ~/.fzf/bin/fzf ${LOCAL_BIN}/fzf"
+        log_dry "download $(bc_tool_url fzf "$platform" "$version")"
+        log_dry "verify sha256, then extract 'fzf' into ${LOCAL_BIN}"
         return 0
     fi
 
-    if has git; then
-        # Git method — clones the tip of the default branch (tracks latest closely).
-        if [[ -d "${HOME}/.fzf" ]]; then
-            log_info "Updating existing fzf clone…"
-            git -C "${HOME}/.fzf" pull --ff-only
-        else
-            git clone --depth 1 https://github.com/junegunn/fzf.git "${HOME}/.fzf"
-        fi
-        # --no-bash / --no-zsh / --no-fish  — don't let fzf touch shell configs;
-        # we manage that ourselves via init.sh.
-        "${HOME}/.fzf/install" --all --no-bash --no-zsh --no-fish
-        # The git installer puts the binary in ~/.fzf/bin — symlink it into
-        # ~/.local/bin so it's on the PATH we manage in exports.sh.
-        if [[ -f "${HOME}/.fzf/bin/fzf" ]]; then
-            ln -sf "${HOME}/.fzf/bin/fzf" "${LOCAL_BIN}/fzf"
-            # Deliberately NOT added to DEPLOYED_LINKS: the manifest means
-            # "symlinks into this repo", and both uninstall.sh and doctor.sh
-            # treat anything else as suspicious.  This link belongs to the fzf
-            # install and is cleaned up by --purge-tools instead.
-            log_ok "Linked ~/.fzf/bin/fzf ${GLYPH_ARROW} ${LOCAL_BIN}/fzf"
-        fi
-    elif has apt-get && root_available; then
-        _as_root apt-get update -qq && _as_root apt-get install -y fzf
-    elif has dnf && root_available; then
-        _as_root dnf install -y fzf
-    elif has pacman && root_available; then
-        _as_root pacman -S --noconfirm fzf
-    elif has brew; then
-        brew install fzf
-    else
-        # Last resort: download pre-built binary from GitHub releases.
-        # The asset filename includes the version, so we query the API first.
-        log_info "Downloading fzf binary from GitHub releases…"
-        local arch os_name fzf_ver fzf_url
-        arch="$(uname -m)"
-        os_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
-        case "$arch" in
-            x86_64)          arch="amd64"  ;;
-            aarch64|arm64)   arch="arm64"  ;;
-            armv7l|armv6l)   arch="armv7"  ;;
-            i386|i686)       arch="386"    ;;
-            *)
-                log_error "fzf: unsupported architecture '${arch}' for binary download"
-                log_error "Install manually: https://github.com/junegunn/fzf/releases"
-                return 1
-                ;;
-        esac
-        fzf_ver="$(download -q "https://api.github.com/repos/junegunn/fzf/releases/latest" \
-                   | grep '"tag_name"' \
-                   | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" || fzf_ver=""
-        if [[ -z "$fzf_ver" ]]; then
-            log_error "Could not determine latest fzf version from GitHub API"
-            return 1
-        fi
-        fzf_url="https://github.com/junegunn/fzf/releases/download/v${fzf_ver}/fzf-${fzf_ver}-${os_name}_${arch}.tar.gz"
-        log_info "Fetching fzf v${fzf_ver} for ${os_name}/${arch}…"
-        mkdir -p "$LOCAL_BIN"
-        download "$fzf_url" | tar -xzf - -C "$LOCAL_BIN" fzf
-        chmod +x "${LOCAL_BIN}/fzf"
+    # The git-clone path is gone: it tracked the tip of the default branch, so
+    # two machines set up a week apart got different fzf builds, and there was
+    # nothing to check a hash against.  The release tarball is one file, one
+    # hash, and needs neither git nor a compiler.
+    log_info "Installing fzf ${version} to ${LOCAL_BIN}…"
+    local blob; blob="$(mktemp)"
+    if ! fetch_verified fzf "$platform" "$version" "$blob"; then
+        rm -f "$blob"; return 1
     fi
-    if has fzf; then log_ok "fzf installed: $(ver fzf)"; fi
+    mkdir -p "$LOCAL_BIN"
+    if tar -xzf "$blob" -C "$LOCAL_BIN" fzf; then
+        chmod +x "${LOCAL_BIN}/fzf"
+        log_ok "fzf installed: $(ver fzf)"
+    else
+        log_error "fzf: could not unpack the archive"
+        rm -f "$blob"; return 1
+    fi
+    rm -f "$blob"
 }
 
 # ── zoxide ────────────────────────────────────────────────────────────────────
 install_zoxide() {
-    log_section "zoxide (v0.9.9+)"
+    local version; version="$(tool_version zoxide)" || {
+        log_error "zoxide: no version available (tools.lock unreadable?)"; return 1; }
+    log_section "zoxide ${version}"
 
     if has zoxide && ! $FORCE; then
         log_ok "zoxide already installed: $(ver zoxide)"
         return 0
     fi
 
-    log_info "Installing zoxide to ${LOCAL_BIN}…"
+    local platform; platform="$(bc_tool_platform)" || {
+        log_error "zoxide: unsupported platform $(uname -s)/$(uname -m)"
+        log_error "  Install it manually: https://github.com/ajeetdsouza/zoxide/releases"
+        return 1
+    }
+
     if $DRY_RUN; then
-        log_dry "curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh"
+        log_dry "download $(bc_tool_url zoxide "$platform" "$version")"
+        log_dry "verify sha256, then extract 'zoxide' into ${LOCAL_BIN}"
         return 0
     fi
 
-    download "https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh" \
-        | env INSTALL_PREFIX="${LOCAL_BIN}" sh
-    if has zoxide; then log_ok "zoxide installed: $(ver zoxide)"; fi
+    # This used to pipe install.sh from zoxide's **main branch** into sh — an
+    # unreleased, unpinned, unverified script running as you.  The release
+    # tarball carries the same binary.
+    log_info "Installing zoxide ${version} to ${LOCAL_BIN}…"
+    local blob; blob="$(mktemp)"
+    if ! fetch_verified zoxide "$platform" "$version" "$blob"; then
+        rm -f "$blob"; return 1
+    fi
+    mkdir -p "$LOCAL_BIN"
+    # The tarball also carries man pages and completions; we want the binary.
+    if tar -xzf "$blob" -C "$LOCAL_BIN" zoxide; then
+        chmod +x "${LOCAL_BIN}/zoxide"
+        log_ok "zoxide installed: $(ver zoxide)"
+    else
+        log_error "zoxide: could not unpack the archive"
+        rm -f "$blob"; return 1
+    fi
+    rm -f "$blob"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1180,4 +1256,6 @@ main() {
     $verified
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

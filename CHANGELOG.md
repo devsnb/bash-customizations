@@ -10,6 +10,31 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+### Added
+
+- Reproducible installs for Starship, fzf, zoxide and ble.sh: `tools.lock`
+  records exact versions and SHA-256 hashes for Linux and macOS on x86-64 and
+  ARM64, and `setup.sh` refuses unverified bytes.
+- `make tools-outdated`, `make tools-lock` and `make tools-update` for reviewing,
+  reproducing and advancing the pinned tool set.
+- Dependabot updates for the GitHub Actions used by CI, and unit coverage for
+  lock completeness, platform mapping, checksum rejection and partial updates.
+- `ports`, a portable `ss`/`lsof` function replacing the Linux-only alias, and
+  advisory `doctor.sh` checks for optional commands used by shell helpers.
+
+### Changed
+
+- fzf and zoxide now install from verified release archives instead of a moving
+  git branch or remote installer script; Starship no longer pipes a downloaded
+  installer into a shell.
+- `extract` reports missing decompressors consistently for common and uncommon
+  archive formats, and `psa` uses syntax supported by macOS.
+
+### Fixed
+
+- Release preparation preserves the normal `0644` permissions of `VERSION` and
+  `CHANGELOG.md` after replacing their temporary files.
+
 ## [1.0.1] - 2026-08-24
 
 ### Added
