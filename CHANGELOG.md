@@ -10,6 +10,8 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-20
+
 ### Added
 
 - Reproducible installs for Starship, fzf, zoxide and ble.sh: `tools.lock`
@@ -134,6 +136,7 @@ tags to check out.
 - Upgrading took no new `~/.bashrc` backup, so a release that changed the managed
   block could only be undone all the way back to the pre-install state.
 
-[Unreleased]: https://github.com/devsnb/bash-customizations/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/devsnb/bash-customizations/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/devsnb/bash-customizations/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/devsnb/bash-customizations/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/devsnb/bash-customizations/releases/tag/v1.0.0
