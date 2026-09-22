@@ -10,6 +10,8 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-22
+
 ### Added
 
 - `fd` is now a pinned, checksum-verified managed tool used by fzf and `fcd`.
@@ -199,7 +201,8 @@ tags to check out.
 - Upgrading took no new `~/.bashrc` backup, so a release that changed the managed
   block could only be undone all the way back to the pre-install state.
 
-[Unreleased]: https://github.com/devsnb/bash-customizations/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/devsnb/bash-customizations/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/devsnb/bash-customizations/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/devsnb/bash-customizations/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/devsnb/bash-customizations/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/devsnb/bash-customizations/compare/v1.1.0...v1.1.1
