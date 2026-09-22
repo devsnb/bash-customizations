@@ -42,26 +42,37 @@ shopt -s histreedit
 
 # ── Immediate write + sync ────────────────────────────────────────────────────
 # After every command:
-#   history -a  → append the new entry to the history file
-#   history -c  → clear the in-memory list
-#   history -r  → re-read the file so all windows stay in sync
+#   history -a  → append this shell's new entry to the history file
+#   history -n  → read only entries appended by other shells since the last sync
+#
+# Clearing and re-reading the entire file made every prompt O(history size), up
+# to HISTFILESIZE lines.  Incremental reads keep cross-window sharing without
+# reparsing as many as 200,000 entries after every command.
 #
 # We prepend to any existing PROMPT_COMMAND rather than replacing it.
 # When ble.sh is active it replaces PROMPT_COMMAND at attach time, making this
 # hook unreachable.  ble.sh provides its own history sync via bleopt history_share
 # in ~/.blerc — no duplicate setup needed here.
 if [[ -z "${BLE_VERSION:-}" ]]; then
-    _hist_sync="history -a; history -c; history -r"
+    _bc_history_sync() {
+        history -a
+        history -n
+        return 0
+    }
 
     # Bash 5.1 changed PROMPT_COMMAND to support array form.
-    # Handle both array and scalar safely.
+    # Handle both array and scalar safely, and stay idempotent when `reload`
+    # sources ~/.bashrc again.
     if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-        PROMPT_COMMAND+=("$_hist_sync")
+        _bc_hist_hook_present=false
+        for _bc_hist_hook in "${PROMPT_COMMAND[@]+"${PROMPT_COMMAND[@]}"}"; do
+            [[ "$_bc_hist_hook" == "_bc_history_sync" ]] && _bc_hist_hook_present=true
+        done
+        $_bc_hist_hook_present || PROMPT_COMMAND+=("_bc_history_sync")
+        unset _bc_hist_hook _bc_hist_hook_present
     elif [[ -z "${PROMPT_COMMAND:-}" ]]; then
-        PROMPT_COMMAND="$_hist_sync"
-    elif [[ "${PROMPT_COMMAND}" != *"$_hist_sync"* ]]; then
-        PROMPT_COMMAND="${_hist_sync}; ${PROMPT_COMMAND}"
+        PROMPT_COMMAND="_bc_history_sync"
+    elif [[ "${PROMPT_COMMAND}" != *"_bc_history_sync"* ]]; then
+        PROMPT_COMMAND="_bc_history_sync; ${PROMPT_COMMAND}"
     fi
-
-    unset _hist_sync
 fi

@@ -103,6 +103,31 @@ run() { $DRY_RUN || "$@"; }
 # every mutating step reports through this instead of a bare log_ok.
 report() { if $DRY_RUN; then log_dry "$2"; else log_ok "$1"; fi; }
 
+# validate_backup_name NAME — accept only directory names this project creates.
+#
+# Backup selectors become filesystem paths and, for --delete-backup, eventually
+# reach `rm -rf`.  Treating them as arbitrary path fragments would let `..` or a
+# slash escape BACKUP_BASE.  Pre-upgrade/pre-restore snapshots are listed by the
+# UI too, so they remain valid explicit selections.
+validate_backup_name() {
+    local name="$1"
+    if [[ ! "$name" =~ ^[0-9]{8}_[0-9]{6}(-pre-(upgrade|restore))?$ ]]; then
+        log_error "Invalid backup timestamp: '${name}'"
+        log_error "Expected YYYYMMDD_HHMMSS (optionally -pre-upgrade or -pre-restore)."
+        return 1
+    fi
+}
+
+# backup_dir_is_safe DIR — an existing, real, direct child of BACKUP_BASE.
+backup_dir_is_safe() {
+    local dir="$1" name
+    [[ "$dir" == "${BACKUP_BASE}/"* ]] || return 1
+    name="${dir#"${BACKUP_BASE}/"}"
+    [[ "$name" != */* ]] || return 1
+    [[ "$name" =~ ^[0-9]{8}_[0-9]{6}(-pre-(upgrade|restore))?$ ]] || return 1
+    [[ -d "$dir" && ! -L "$dir" ]]
+}
+
 # confirm PROMPT — ask yes/no; return 0 for yes, 1 for no.
 #
 # --yes answers everything.  Without a terminal (CI, `make` in a pipe,
@@ -138,10 +163,12 @@ parse_args() {
             --yes|-y)         ASSUME_YES=true ;;
             --purge-tools)    PURGE_TOOLS=true ;;
             --restore)        RESTORE=true ;;
-            --restore=*)      RESTORE=true; RESTORE_TIMESTAMP="${arg#--restore=}" ;;
+            --restore=*)      RESTORE=true; RESTORE_TIMESTAMP="${arg#--restore=}"
+                              validate_backup_name "$RESTORE_TIMESTAMP" || exit 1 ;;
             --restore-only)   RESTORE=true; RESTORE_ONLY=true ;;
             --restore-only=*) RESTORE=true; RESTORE_ONLY=true
-                              RESTORE_TIMESTAMP="${arg#--restore-only=}" ;;
+                              RESTORE_TIMESTAMP="${arg#--restore-only=}"
+                              validate_backup_name "$RESTORE_TIMESTAMP" || exit 1 ;;
             --list-backups)   LIST_BACKUPS=true ;;
             --prune-backups)  PRUNE_BACKUPS=true ;;
             --prune-backups=*)
@@ -151,7 +178,8 @@ parse_args() {
                     exit 1
                 fi
                 ;;
-            --delete-backup=*) DELETE_BACKUP="${arg#--delete-backup=}" ;;
+            --delete-backup=*) DELETE_BACKUP="${arg#--delete-backup=}"
+                                validate_backup_name "$DELETE_BACKUP" || exit 1 ;;
             -V|--version) print_version "uninstall.sh"; exit 0 ;;
             -h|--help)
                 echo "Usage: bash uninstall.sh [options]"
@@ -198,6 +226,7 @@ parse_args() {
 # Populated by read_manifest or fall back to known defaults.
 MANIFEST_REPO=""
 MANIFEST_BACKUP=""
+MANIFEST_VERSION=""
 MANIFEST_LINKS=()
 MANIFEST_TOOLS=()
 MANIFEST_GUARD_ADDED=false
@@ -205,6 +234,7 @@ MANIFEST_GUARD_ADDED=false
 read_manifest() {
     MANIFEST_REPO=""
     MANIFEST_BACKUP=""
+    MANIFEST_VERSION=""
     MANIFEST_LINKS=()
     MANIFEST_TOOLS=()
     MANIFEST_GUARD_ADDED=false
@@ -222,6 +252,7 @@ read_manifest() {
         [[ -z "$key" || "$key" == \#* ]] && continue
         case "$key" in
             REPO)         MANIFEST_REPO="$value"         ;;
+            VERSION)      MANIFEST_VERSION="$value"      ;;
             BACKUP)       MANIFEST_BACKUP="$value"       ;;
             LINK)         MANIFEST_LINKS+=("$value")     ;;
             TOOL)
@@ -270,7 +301,12 @@ _use_default_targets() {
 # _backup_dirs — print every backup directory, newest first, one per line.
 _backup_dirs() {
     [[ -d "$BACKUP_BASE" ]] || return 0
-    find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -r
+    local dir
+    while IFS= read -r dir; do
+        backup_dir_is_safe "$dir" && printf '%s\n' "$dir"
+    done < <(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null) \
+        | sort -r
+    return 0
 }
 
 list_backups() {
@@ -342,7 +378,7 @@ delete_backup() {
 
     log_section "Deleting backup ${ts}"
 
-    if [[ ! -d "$dir" ]]; then
+    if ! backup_dir_is_safe "$dir"; then
         log_error "Backup not found: ${dir}"
         log_error "Run: bash uninstall.sh --list-backups"
         exit 1
@@ -367,21 +403,20 @@ resolve_backup_dir() {
 
     if [[ -n "$RESTORE_TIMESTAMP" ]]; then
         restore_dir="${BACKUP_BASE}/${RESTORE_TIMESTAMP}"
-        if [[ ! -d "$restore_dir" ]]; then
+        if ! backup_dir_is_safe "$restore_dir"; then
             log_error "Backup not found: ${restore_dir}"
             log_error "Run: bash uninstall.sh --list-backups"
             exit 1
         fi
     else
         # Use backup recorded in manifest first; fall back to newest on disk.
-        if [[ -n "$MANIFEST_BACKUP" && -d "$MANIFEST_BACKUP" ]]; then
+        if [[ -n "$MANIFEST_BACKUP" ]] && backup_dir_is_safe "$MANIFEST_BACKUP"; then
             restore_dir="$MANIFEST_BACKUP"
         else
-            restore_dir="$(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
-                | sort -r | head -1)"
+            restore_dir="$(_backup_dirs | head -1)"
         fi
 
-        if [[ -z "$restore_dir" || ! -d "$restore_dir" ]]; then
+        if [[ -z "$restore_dir" ]] || ! backup_dir_is_safe "$restore_dir"; then
             log_error "No backups found in ${BACKUP_BASE}."
             log_error "Cannot restore.  The state before setup.sh ran is gone."
             exit 1
@@ -616,6 +651,15 @@ _remove_bin() {
 # .bashrc block removal
 # ══════════════════════════════════════════════════════════════════════════════
 
+# _valid_block_pair FILE BEGIN END — exactly one ordered, non-nested pair.
+_valid_block_pair() {
+    awk -v begin="$2" -v end="$3" '
+        $0 == begin { begins++; if (inside) bad = 1; inside = 1; next }
+        $0 == end   { ends++;   if (!inside) bad = 1; inside = 0 }
+        END { exit !(begins == 1 && ends == 1 && !inside && !bad) }
+    ' "$1" 2>/dev/null
+}
+
 remove_bashrc_blocks() {
     log_section "Removing bash-customizations blocks from ~/.bashrc"
 
@@ -635,6 +679,20 @@ remove_bashrc_blocks() {
         return 0
     fi
 
+    # Never guess where a malformed managed block ends.  Without this check a
+    # missing END marker would make the rewrite consume the rest of the user's
+    # file.  Refuse while the original is still untouched.
+    if $head_found && ! _valid_block_pair "$bashrc" "$BLOCK_HEAD_BEGIN" "$BLOCK_HEAD_END"; then
+        log_error "Malformed bash-customizations HEAD block in ~/.bashrc — refusing to rewrite it."
+        log_error "Restore a backup or repair the BEGIN/END markers, then retry."
+        return 1
+    fi
+    if $tail_found && ! _valid_block_pair "$bashrc" "$BLOCK_TAIL_BEGIN" "$BLOCK_TAIL_END"; then
+        log_error "Malformed bash-customizations TAIL block in ~/.bashrc — refusing to rewrite it."
+        log_error "Restore a backup or repair the BEGIN/END markers, then retry."
+        return 1
+    fi
+
     if $DRY_RUN; then
         $head_found && log_dry "Remove HEAD block from ~/.bashrc"
         $tail_found && log_dry "Remove TAIL block from ~/.bashrc"
@@ -648,7 +706,7 @@ remove_bashrc_blocks() {
     mode="$(stat -c '%a' "$bashrc" 2>/dev/null || stat -f '%Lp' "$bashrc" 2>/dev/null || echo 644)"
 
     local tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "${bashrc}.bash-customizations.XXXXXX")"
     local in_block=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -665,7 +723,7 @@ remove_bashrc_blocks() {
             if $MANIFEST_GUARD_ADDED && [[ "$line" =~ ^\[\[.*\$-.*\*i\*.*return ]]; then
                 continue
             fi
-            echo "$line"
+            printf '%s\n' "$line"
         fi
     done < "$bashrc" > "$tmp"
 
@@ -680,7 +738,31 @@ remove_bashrc_blocks() {
 # ══════════════════════════════════════════════════════════════════════════════
 
 remove_manifest() {
-    if [[ -f "$MANIFEST_FILE" ]]; then
+    # A normal uninstall deliberately leaves the managed tools installed.  Keep
+    # their ownership records too, otherwise a subsequent setup sees those same
+    # binaries as unowned conflicts and --purge-tools can never remove them.
+    if [[ ${#MANIFEST_TOOLS[@]} -gt 0 ]] && ! $PURGED; then
+        if $DRY_RUN; then
+            log_dry "Retain tool ownership manifest: ${MANIFEST_FILE}"
+        else
+            mkdir -p "$MANIFEST_DIR"
+            local tmp_manifest
+            tmp_manifest="$(mktemp "${MANIFEST_DIR}/.manifest.XXXXXX")"
+            {
+                printf '%s\n' '# bash-customizations retained tool ownership manifest'
+                printf 'REPO=%s\n' "${MANIFEST_REPO:-$REPO_DIR}"
+                [[ -n "$MANIFEST_VERSION" ]] && printf 'VERSION=%s\n' "$MANIFEST_VERSION"
+                [[ -n "$MANIFEST_BACKUP" ]] && printf 'BACKUP=%s\n' "$MANIFEST_BACKUP"
+                local tool_record
+                for tool_record in "${MANIFEST_TOOLS[@]}"; do
+                    printf 'TOOL=%s\n' "$tool_record"
+                done
+            } > "$tmp_manifest"
+            chmod 644 "$tmp_manifest"
+            mv "$tmp_manifest" "$MANIFEST_FILE"
+            log_ok "Retained tool ownership manifest: ${MANIFEST_FILE}"
+        fi
+    elif [[ -f "$MANIFEST_FILE" ]]; then
         run rm "$MANIFEST_FILE"
         report "Removed manifest: ${MANIFEST_FILE}" "Would remove manifest: ${MANIFEST_FILE}"
     fi

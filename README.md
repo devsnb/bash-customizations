@@ -56,7 +56,7 @@ Files inside `bash/` are symlinked as `~/.bash/`; `.blerc` and `starship.toml` a
 
 The HEAD block is inserted immediately after your non-interactive guard (or prepended if none exists). The TAIL block is appended at the end. Re-running `setup.sh` updates the blocks in-place without touching anything outside them. Every module setting lives in its own file under `bash/` so individual modules can be tested with `source ~/.bash/<module>.sh` without restarting the shell.
 
-The install manifest (`~/.local/share/bash-customizations/manifest`) is a **generated runtime artifact** — it is written by `setup.sh`, never committed to git. It records the repo path, the backup directory used, every symlink created, and the version and installed-file hash of each tool the project owns. `uninstall.sh` and `doctor.sh` read it; if it is absent they fall back to a hardcoded default symlink list but claim ownership of no tools. Previous manifests are kept as `manifest.<timestamp>.bak` (last 5 retained).
+The install manifest (`~/.local/share/bash-customizations/manifest`) is a **generated runtime artifact** — it is written by `setup.sh`, never committed to git. It records the repo path, the backup directory used, every symlink created, and the version and installed-file hash of each tool the project owns. `uninstall.sh` and `doctor.sh` read it; if it is absent they fall back to a hardcoded default symlink list but claim ownership of no tools. A plain uninstall leaves the tools installed and retains a minimal ownership-only manifest, so a later reinstall or `--purge-tools` still recognises them. Previous manifests are kept as `manifest.<timestamp>.bak` (last 5 retained).
 
 ---
 
@@ -250,10 +250,11 @@ back to the newest on disk. Pass `--restore=TIMESTAMP` to be explicit.
 - Verifies each symlink points back into this repo before touching it
 - Falls back to a hardcoded default list if no manifest exists
 - Removes tool binaries only when the manifest records that this project installed or explicitly took ownership of them; same-name user binaries are left alone
+- Retains tool ownership metadata when uninstalling without `--purge-tools`, so reinstall and later purge remain safe
 - Never removes system packages (`bash-completion` stays)
 - Always asks for confirmation before removing anything, and again before `--purge-tools`
 - Without a terminal to ask, it **exits 1 instead of doing nothing quietly** — pass `--yes` to proceed
-- Validates a `--restore=TIMESTAMP` *before* touching anything, so a typo cannot leave a half-uninstalled shell
+- Validates backup selectors as generated timestamp names and resolves them only below `~/.bash_backup` before touching anything
 - A restore replaces real files (including `~/.bashrc`) and snapshots whatever it overwrites into `~/.bash_backup/<ts>-pre-restore/`
 
 ---

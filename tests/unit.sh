@@ -165,6 +165,23 @@ out=$(
 assert_contains "$out" "fzf is not installed" "fkill -s parses without treating the filter as a signal"
 
 # ══════════════════════════════════════════════════════════════════════════════
+suite "bash/history.sh — incremental prompt sync"
+# ══════════════════════════════════════════════════════════════════════════════
+
+history_state=$(bash --noprofile --norc -c '
+    PROMPT_COMMAND=(existing)
+    source "$1/bash/history.sh"
+    source "$1/bash/history.sh"
+    printf "%s\n" "${PROMPT_COMMAND[@]}"
+    declare -f _bc_history_sync
+' _ "$REPO_DIR")
+assert_eq "1" "$(printf '%s\n' "$history_state" | grep -cx '_bc_history_sync')" \
+    "history hook is idempotent in array-form PROMPT_COMMAND"
+assert_contains "$history_state" "history -n" "history sharing reads only newly appended entries"
+assert_not_contains "$history_state" "history -c" "history sharing does not clear history every prompt"
+assert_not_contains "$history_state" "history -r" "history sharing does not reread the full history file"
+
+# ══════════════════════════════════════════════════════════════════════════════
 suite "bash/exports.sh + bash/aliases.sh"
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -268,6 +285,21 @@ done
 out=$(bash "${REPO_DIR}/uninstall.sh" --prune-backups=abc 2>&1 || true)
 assert_contains "$out" "expects a number" "uninstall validates --prune-backups=N"
 
+for bad_selector in '../outside' 'nested/backup' '.' '' 'not-a-timestamp'; do
+    assert_exit 1 "uninstall rejects unsafe backup selector '${bad_selector:-<empty>}'" \
+        bash "${REPO_DIR}/uninstall.sh" "--delete-backup=${bad_selector}"
+done
+assert_exit 1 "restore rejects a backup path outside the backup root" \
+    bash "${REPO_DIR}/uninstall.sh" --restore=../outside
+assert_exit 1 "restore-only rejects an empty backup timestamp" \
+    bash "${REPO_DIR}/uninstall.sh" --restore-only=
+SELECTOR_HOME="${WORK}/selector-home"
+mkdir -p "${SELECTOR_HOME}/.bash_backup" "${WORK}/outside-backup"
+ln -s "${WORK}/outside-backup" "${SELECTOR_HOME}/.bash_backup/20000101_000000"
+assert_exit 1 "restore rejects a timestamp-shaped symlink outside the backup root" \
+    env HOME="$SELECTOR_HOME" bash "${REPO_DIR}/uninstall.sh" \
+        --restore=20000101_000000 --yes
+
 # ═════════════════════════════════════════════════════════════════════════════
 suite "installer ownership and atomic replacement"
 # ═════════════════════════════════════════════════════════════════════════════
@@ -367,6 +399,95 @@ assert_exit 0 "tool purge succeeds with an ownership manifest" \
 assert_absent "${PURGE_HOME}/.local/bin/starship" "purge removes an owned binary"
 assert_exists "${PURGE_HOME}/.local/bin/fzf" "purge preserves an unowned same-name binary"
 assert_exists "${PURGE_HOME}/.local/share/blesh/ble.sh" "purge preserves an unowned ble.sh directory"
+
+# A plain uninstall leaves tools installed, so it must leave their ownership
+# metadata too.  Otherwise the next setup rejects its own binary as unowned.
+RETAIN_HOME="${WORK}/retain-home"
+mkdir -p "${RETAIN_HOME}/.local/bin" "${RETAIN_HOME}/.local/share/bash-customizations"
+printf '#!/usr/bin/env bash\necho "starship 9.9.9"\n' > "${RETAIN_HOME}/.local/bin/starship"
+chmod +x "${RETAIN_HOME}/.local/bin/starship"
+retain_sha="$(bash --norc -c 'source "$1/lib/tools.sh"; bc_sha256 "$2"' \
+    _ "$REPO_DIR" "${RETAIN_HOME}/.local/bin/starship")"
+printf 'REPO=%s\nVERSION=9.9.9\nTOOL=starship:9.9.9:%s\n' "$REPO_DIR" "$retain_sha" \
+    > "${RETAIN_HOME}/.local/share/bash-customizations/manifest"
+assert_exit 0 "plain uninstall succeeds while managed tools remain" \
+    env HOME="$RETAIN_HOME" bash "${REPO_DIR}/uninstall.sh" --yes
+assert_file_contains "${RETAIN_HOME}/.local/share/bash-customizations/manifest" \
+    "TOOL=starship:9.9.9:${retain_sha}" "plain uninstall retains tool ownership"
+decision=$(HOME="$RETAIN_HOME" bash --norc -c '
+    source "$1/setup.sh"
+    load_tool_ownership
+    if binary_install_decision starship 9.9.9 >/dev/null; then echo 0; else echo $?; fi
+' _ "$REPO_DIR")
+assert_eq "1" "$decision" "a reinstall recognises the retained managed binary"
+
+# Ownership checkpoints preserve the previous deployment records and make a
+# newly activated tool recoverable even if a later installer aborts.
+CHECKPOINT_HOME="${WORK}/checkpoint-home"
+mkdir -p "${CHECKPOINT_HOME}/.local/share/bash-customizations"
+printf 'REPO=%s\nLINK=%s/.bash/exports.sh\n' "$REPO_DIR" "$CHECKPOINT_HOME" \
+    > "${CHECKPOINT_HOME}/.local/share/bash-customizations/manifest"
+assert_exit 0 "tool ownership can be checkpointed before dotfile deployment" \
+    env HOME="$CHECKPOINT_HOME" bash --norc -c '
+        source "$1/setup.sh"
+        MANAGED_TOOLS=(starship:9.9.9:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
+        write_tool_ownership_checkpoint
+    ' _ "$REPO_DIR"
+assert_file_contains "${CHECKPOINT_HOME}/.local/share/bash-customizations/manifest" \
+    "LINK=${CHECKPOINT_HOME}/.bash/exports.sh" "ownership checkpoint preserves existing links"
+assert_file_contains "${CHECKPOINT_HOME}/.local/share/bash-customizations/manifest" \
+    "TOOL=starship:9.9.9:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+    "ownership checkpoint persists an activated tool"
+
+FAIL_HOME="${WORK}/failed-install-home"
+mkdir -p "$FAIL_HOME"
+assert_exit 1 "a later installer failure still exits non-zero" \
+    env HOME="$FAIL_HOME" bash --norc -c '
+        source "$1/setup.sh"
+        print_banner() { :; }
+        check_prerequisites() { :; }
+        ensure_locale() { :; }
+        install_starship() {
+            record_managed_tool starship 9.9.9 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        }
+        install_blesh() { return 1; }
+        main
+    ' _ "$REPO_DIR"
+assert_file_contains "${FAIL_HOME}/.local/share/bash-customizations/manifest" \
+    "TOOL=starship:9.9.9:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
+    "a partial setup persists ownership before the next installer"
+
+# Managed-block rewrites must preserve arbitrary user lines and reject damaged
+# marker structure before touching the file.
+REWRITE_DIR="${WORK}/rewrite"
+mkdir -p "$REWRITE_DIR"
+printf '%s\n' before '# === BEGIN bash-customizations ===' old \
+    '# === END bash-customizations ===' -n after > "${REWRITE_DIR}/bashrc"
+printf '%s\n' '# === BEGIN bash-customizations ===' new \
+    '# === END bash-customizations ===' > "${REWRITE_DIR}/block"
+assert_exit 0 "a valid managed block can be rewritten" bash --norc -c '
+    source "$1/setup.sh"
+    _rewrite_block "$2/bashrc" "$BLOCK_HEAD_BEGIN" "$BLOCK_HEAD_END" "$2/block"
+' _ "$REPO_DIR" "$REWRITE_DIR"
+assert_file_contains "${REWRITE_DIR}/bashrc" '-n' "bashrc rewrite preserves an echo option-like line"
+
+printf '%s\n' before '# === BEGIN bash-customizations ===' old after > "${REWRITE_DIR}/malformed"
+cp "${REWRITE_DIR}/malformed" "${REWRITE_DIR}/malformed.expected"
+assert_exit 1 "setup refuses an unterminated managed block" bash --norc -c '
+    source "$1/setup.sh"
+    _rewrite_block "$2/malformed" "$BLOCK_HEAD_BEGIN" "$BLOCK_HEAD_END" "$2/block"
+' _ "$REPO_DIR" "$REWRITE_DIR"
+assert_exit 0 "refusing a malformed block leaves bashrc byte-for-byte intact" \
+    cmp -s "${REWRITE_DIR}/malformed" "${REWRITE_DIR}/malformed.expected"
+mkdir -p "${REWRITE_DIR}/uninstall-home"
+cp "${REWRITE_DIR}/malformed" "${REWRITE_DIR}/uninstall-home/.bashrc"
+assert_exit 1 "uninstall refuses an unterminated managed block" \
+    env HOME="${REWRITE_DIR}/uninstall-home" bash --norc -c '
+        source "$1/uninstall.sh"
+        remove_bashrc_blocks
+    ' _ "$REPO_DIR"
+assert_exit 0 "uninstall leaves a malformed bashrc byte-for-byte intact" \
+    cmp -s "${REWRITE_DIR}/uninstall-home/.bashrc" "${REWRITE_DIR}/malformed.expected"
 
 assert_eq "0" "$(grep -cE 'make .*test-docker' "${REPO_DIR}/tools/release.sh" || true)" \
     "release checks do not invoke the Docker suite a second time"

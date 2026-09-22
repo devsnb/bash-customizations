@@ -367,6 +367,50 @@ record_managed_tool() {
     MANAGED_TOOLS+=("${name}:${version}:${sha}")
 }
 
+# write_tool_ownership_checkpoint — persist activated tools before continuing.
+#
+# Tool activation happens before dotfile deployment and the final manifest
+# rewrite.  If a later download or ~/.bashrc update fails, an in-memory-only
+# ownership record would be lost and the next run would reject our new binaries
+# as unowned conflicts.  Update only TOOL= lines here; existing LINK/BACKUP data
+# stays intact until write_manifest commits the completed install.
+write_tool_ownership_checkpoint() {
+    $DRY_RUN && return 0
+    [[ ${#MANAGED_TOOLS[@]} -gt 0 ]] || return 0
+
+    mkdir -p "$MANIFEST_DIR"
+    local tmp line value name record managed
+    tmp="$(mktemp "${MANIFEST_DIR}/.manifest.XXXXXX")"
+
+    if [[ -f "$MANIFEST_FILE" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" == TOOL=* ]]; then
+                value="${line#TOOL=}"
+                name="${value%%:*}"
+                managed=false
+                for record in "${MANAGED_TOOLS[@]}"; do
+                    [[ "${record%%:*}" == "$name" ]] && { managed=true; break; }
+                done
+                $managed && continue
+            fi
+            printf '%s\n' "$line"
+        done < "$MANIFEST_FILE" > "$tmp"
+    else
+        {
+            printf '%s\n' '# bash-customizations in-progress ownership manifest'
+            printf 'REPO=%s\n' "$REPO_DIR"
+            printf 'VERSION=%s\n' "$BC_VERSION"
+            printf 'BACKUP=\n'
+        } > "$tmp"
+    fi
+
+    for record in "${MANAGED_TOOLS[@]}"; do
+        printf 'TOOL=%s\n' "$record" >> "$tmp"
+    done
+    chmod 644 "$tmp"
+    mv "$tmp" "$MANIFEST_FILE"
+}
+
 # installed_binary_version NAME — normalise the first dotted version printed by
 # a local managed binary.  It deliberately addresses LOCAL_BIN directly: a
 # system binary elsewhere on PATH must not suppress installation of the pin.
@@ -947,13 +991,27 @@ _blocks_are_current() {
     [[ "$current" == "$expected" ]]
 }
 
+# _valid_block_pair FILE BEGIN END — exactly one ordered, non-nested pair.
+_valid_block_pair() {
+    awk -v begin="$2" -v end="$3" '
+        $0 == begin { begins++; if (inside) bad = 1; inside = 1; next }
+        $0 == end   { ends++;   if (!inside) bad = 1; inside = 0 }
+        END { exit !(begins == 1 && ends == 1 && !inside && !bad) }
+    ' "$1" 2>/dev/null
+}
+
 # _rewrite_block FILE BEGIN END NEW_BLOCK_FILE
 # Replace the old block (between BEGIN and END inclusive) with NEW_BLOCK_FILE.
 # NEW_BLOCK_FILE must include the begin/end marker lines.
 _rewrite_block() {
     local file="$1" begin="$2" end="$3" new_block_file="$4"
+    if ! _valid_block_pair "$file" "$begin" "$end"; then
+        log_error "Malformed managed block in ${file} — refusing to rewrite it."
+        log_error "Expected exactly one ordered BEGIN/END marker pair."
+        return 1
+    fi
     local tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "${file}.bash-customizations.XXXXXX")"
     local in_block=0
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" == "$begin" ]]; then
@@ -962,7 +1020,7 @@ _rewrite_block() {
         elif [[ $in_block -eq 1 && "$line" == "$end" ]]; then
             in_block=0
         elif [[ $in_block -eq 0 ]]; then
-            echo "$line"
+            printf '%s\n' "$line"
         fi
     done < "$file" > "$tmp"
     replace_file "$tmp" "$file"
@@ -974,15 +1032,15 @@ _rewrite_block() {
 _inject_blocks() {
     local file="$1" head_file="$2" tail_file="$3"
     local tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "${file}.bash-customizations.XXXXXX")"
     local inserted_head=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        echo "$line"
+        printf '%s\n' "$line"
         if [[ $inserted_head -eq 0 && "$line" == *'$-'*'*i*'*'return'* ]]; then
-            echo ""
+            printf '\n'
             cat "$head_file"
-            echo ""
+            printf '\n'
             inserted_head=1
         fi
     done < "$file" > "$tmp"
@@ -990,13 +1048,13 @@ _inject_blocks() {
     if [[ $inserted_head -eq 0 ]]; then
         # No non-interactive guard found — prepend HEAD block
         local tmp2
-        tmp2="$(mktemp)"
-        { cat "$head_file"; echo ""; cat "$tmp"; } > "$tmp2"
+        tmp2="$(mktemp "${file}.bash-customizations.XXXXXX")"
+        { cat "$head_file"; printf '\n'; cat "$tmp"; } > "$tmp2"
         mv "$tmp2" "$tmp"
     fi
 
     # Append TAIL block
-    { cat "$tmp"; echo ""; cat "$tail_file"; } > "${tmp}.out"
+    { cat "$tmp"; printf '\n'; cat "$tail_file"; } > "${tmp}.out"
     replace_file "${tmp}.out" "$file"
     rm -f "$tmp"
 }
@@ -1018,14 +1076,14 @@ _ensure_noninteractive_guard() {
 
     log_info "Non-interactive guard missing — adding it to ${file}…"
     local tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "${file}.bash-customizations.XXXXXX")"
     local inserted=0
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ $inserted -eq 0 && "$line" == "$BLOCK_HEAD_BEGIN" ]]; then
             printf '%s\n\n' "$guard"
             inserted=1
         fi
-        echo "$line"
+        printf '%s\n' "$line"
     done < "$file" > "$tmp"
     replace_file "$tmp" "$file"
     GUARD_ADDED=true
@@ -1043,6 +1101,20 @@ inject_bashrc() {
         if ! $DRY_RUN; then
             printf '%s\n' '# ~/.bashrc' '[[ $- != *i* ]] && return' > "$bashrc"
         fi
+    fi
+
+    # Validate every marker pair before changing either block.  This prevents a
+    # valid HEAD from being updated before a malformed TAIL is discovered, and
+    # ensures a damaged marker can never make a rewrite consume user content.
+    if grep -qF "$BLOCK_HEAD_BEGIN" "$bashrc" 2>/dev/null \
+        && ! _valid_block_pair "$bashrc" "$BLOCK_HEAD_BEGIN" "$BLOCK_HEAD_END"; then
+        log_error "Malformed bash-customizations HEAD block in ${bashrc} — refusing to rewrite it."
+        return 1
+    fi
+    if grep -qF "$BLOCK_TAIL_BEGIN" "$bashrc" 2>/dev/null \
+        && ! _valid_block_pair "$bashrc" "$BLOCK_TAIL_BEGIN" "$BLOCK_TAIL_END"; then
+        log_error "Malformed bash-customizations TAIL block in ${bashrc} — refusing to rewrite it."
+        return 1
     fi
 
     # Back up whenever this run is about to change the file: either our blocks
@@ -1412,10 +1484,14 @@ main() {
 
     if ! $SKIP_TOOLS; then
         install_starship
+        write_tool_ownership_checkpoint
         install_blesh
+        write_tool_ownership_checkpoint
         install_bash_completion
         install_fzf
+        write_tool_ownership_checkpoint
         install_zoxide
+        write_tool_ownership_checkpoint
     fi
 
     deploy_dotfiles

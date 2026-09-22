@@ -10,6 +10,23 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+### Changed
+
+- Plain uninstall now retains a minimal tool-ownership manifest so later
+  reinstalls and `--purge-tools` still recognise binaries left in place.
+- Readline history sharing reads only newly appended entries and installs its
+  prompt hook idempotently instead of clearing and rereading the full history.
+
+### Fixed
+
+- Backup restore/delete selectors cannot escape `~/.bash_backup` through empty,
+  nested or parent-directory paths.
+- Setup checkpoints tool ownership after each successful activation, preventing
+  a later install failure from stranding earlier tools as unowned conflicts.
+- Setup and uninstall validate managed `.bashrc` marker pairs before rewriting,
+  preserve option-like user lines, and rename temporary files on the same
+  filesystem.
+
 ## [1.1.1] - 2026-09-22
 
 ### Changed

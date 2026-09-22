@@ -243,7 +243,7 @@ assert_absent "$HOME/.config/starship.toml" "starship.toml symlink is gone"
 assert_exit 1 "doctor.sh now reports the setup as absent" bash "${REPO_DIR}/doctor.sh"
 
 # ══════════════════════════════════════════════════════════════════════════════
-suite "9. plain uninstall (no restore) removes every trace"
+suite "9. plain uninstall removes dotfiles and retains tool ownership"
 # ══════════════════════════════════════════════════════════════════════════════
 
 assert_exit 0 "re-install for the final case" bash "${REPO_DIR}/setup.sh" --skip-tools
@@ -257,7 +257,11 @@ assert_contains "$real_out" "[OK]    Removed" "a real uninstall reports what it 
 assert_eq "0" "$(count_blocks '# === BEGIN bash-customizations ===')" "HEAD block removed"
 assert_eq "0" "$(count_blocks '# === BEGIN bash-customizations-attach ===')" "TAIL block removed"
 assert_absent "$HOME/.bash/exports.sh" "module symlinks removed"
-assert_absent "$HOME/.local/share/bash-customizations/manifest" "manifest removed"
+assert_exists "$HOME/.local/share/bash-customizations/manifest" "tool ownership manifest retained"
+assert_eq "0" "$(grep -c '^LINK=' "$HOME/.local/share/bash-customizations/manifest" || true)" \
+    "retained manifest claims no removed symlinks"
+assert_eq "4" "$(grep -c '^TOOL=' "$HOME/.local/share/bash-customizations/manifest" || true)" \
+    "retained manifest keeps all managed tool ownership records"
 assert_file_contains "$HOME/.bashrc" "$ORIGINAL_BASHRC_MARKER" \
     "the user's own .bashrc content survives a plain uninstall"
 
