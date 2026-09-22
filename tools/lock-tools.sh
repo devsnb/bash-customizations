@@ -83,6 +83,68 @@ bc_tools_load || log_warn "No readable tools.lock yet — creating one."
 
 # ── Discovering the newest release ────────────────────────────────────────────
 
+# github_api PATH — query GitHub with stable headers and optional authentication.
+# GITHUB_TOKEN/ GH_TOKEN raise the rate limit; neither value is ever printed.
+github_api() {
+    local path="$1" token="${GITHUB_TOKEN:-${GH_TOKEN:-}}" body detail err
+    local -a args=(
+        -sSfL --retry 3 --connect-timeout 20
+        -H 'Accept: application/vnd.github+json'
+        -H 'X-GitHub-Api-Version: 2022-11-28'
+    )
+    [[ -n "$token" ]] && args+=(-H "Authorization: Bearer ${token}")
+
+    err="$(mktemp)"
+    if ! body="$(curl "${args[@]}" "https://api.github.com${path}" 2>"$err")"; then
+        detail="$(<"$err")"
+        rm -f "$err"
+        if [[ "$detail" == *'403'* || "$detail" == *'rate limit'* ]]; then
+            log_error "GitHub API rate limit reached while requesting ${path}."
+            log_error "  Set GITHUB_TOKEN or GH_TOKEN and try again."
+        else
+            log_error "GitHub API request failed for ${path}: ${detail:-unknown error}"
+        fi
+        return 1
+    fi
+    rm -f "$err"
+
+    # GitHub can return a JSON error object through proxies that mask the HTTP
+    # status.  Do not let its message get mistaken for an empty release field.
+    if [[ "$body" == *'"message"'* && "$body" == *'rate limit'* ]]; then
+        log_error "GitHub API rate limit reached while requesting ${path}."
+        log_error "  Set GITHUB_TOKEN or GH_TOKEN and try again."
+        return 1
+    fi
+    printf '%s\n' "$body"
+}
+
+json_release_tag() {
+    if command -v python3 &>/dev/null; then
+        python3 -c 'import json,sys; tag=json.load(sys.stdin)["tag_name"]; print(tag[1:] if tag.startswith("v") else tag)'
+    else
+        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -1
+    fi
+}
+
+json_blesh_version() {
+    if command -v python3 &>/dev/null; then
+        python3 -c '
+import json, re, sys
+names = (asset.get("name", "") for asset in json.load(sys.stdin).get("assets", []))
+versions = []
+for name in names:
+    match = re.fullmatch(r"ble-(nightly-[0-9]{8}\+[0-9a-f]+)\.tar\.xz", name)
+    if match:
+        versions.append(match.group(1))
+if versions:
+    print(max(versions))
+'
+    else
+        grep -oE '"name"[[:space:]]*:[[:space:]]*"ble-nightly-[0-9]{8}\+[0-9a-f]+\.tar\.xz"' \
+            | sed 's/.*"ble-\(.*\)\.tar\.xz"/\1/' | sort | tail -1
+    fi
+}
+
 # latest_version TOOL — the newest published version, without a leading v.
 latest_version() {
     local tool="$1" repo tag body
@@ -94,20 +156,15 @@ latest_version() {
             # The nightly release's assets are the builds; the tag never moves.
             # Newest dated asset wins — ble-nightly.tar.xz itself is the rolling
             # pointer we are deliberately not pinning to.
-            body="$(curl -sSf "https://api.github.com/repos/akinomyoga/ble.sh/releases/tags/nightly")" \
-                || return 1
-            printf '%s\n' "$body" \
-                | grep -oE '"name": "ble-nightly-[0-9]{8}\+[0-9a-f]+\.tar\.xz"' \
-                | sed 's/.*"ble-\(.*\)\.tar\.xz"/\1/' \
-                | sort | tail -1
+            body="$(github_api '/repos/akinomyoga/ble.sh/releases/tags/nightly')" || return 1
+            printf '%s\n' "$body" | json_blesh_version
             return ;;
     esac
     # Buffer the response rather than piping it: `grep -m1` closes the pipe as
     # soon as it matches, and curl then reports "(23) Failure writing output"
     # onto stderr for a request that in fact succeeded.
-    body="$(curl -sSf "https://api.github.com/repos/${repo}/releases/latest")" || return 1
-    tag="$(printf '%s\n' "$body" \
-           | grep -m1 '"tag_name":' | sed 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/')"
+    body="$(github_api "/repos/${repo}/releases/latest")" || return 1
+    tag="$(printf '%s\n' "$body" | json_release_tag)" || return 1
     printf '%s\n' "$tag"
 }
 

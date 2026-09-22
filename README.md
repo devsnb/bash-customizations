@@ -56,7 +56,7 @@ Files inside `bash/` are symlinked as `~/.bash/`; `.blerc` and `starship.toml` a
 
 The HEAD block is inserted immediately after your non-interactive guard (or prepended if none exists). The TAIL block is appended at the end. Re-running `setup.sh` updates the blocks in-place without touching anything outside them. Every module setting lives in its own file under `bash/` so individual modules can be tested with `source ~/.bash/<module>.sh` without restarting the shell.
 
-The install manifest (`~/.local/share/bash-customizations/manifest`) is a **generated runtime artifact** — it is written by `setup.sh`, never committed to git. It records the repo path, the backup directory used, and every symlink created. `uninstall.sh` and `doctor.sh` read it; if it is absent they fall back to a hardcoded default list. Previous manifests are kept as `manifest.<timestamp>.bak` (last 5 retained).
+The install manifest (`~/.local/share/bash-customizations/manifest`) is a **generated runtime artifact** — it is written by `setup.sh`, never committed to git. It records the repo path, the backup directory used, every symlink created, and the version and installed-file hash of each tool the project owns. `uninstall.sh` and `doctor.sh` read it; if it is absent they fall back to a hardcoded default symlink list but claim ownership of no tools. Previous manifests are kept as `manifest.<timestamp>.bak` (last 5 retained).
 
 ---
 
@@ -71,9 +71,16 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | pinned release asset | Frecency-ranked directory jumper (`z`, `zi`) |
 
 The exact versions and SHA-256 hashes are committed in [`tools.lock`](tools.lock).
-`setup.sh` refuses a missing, malformed, or mismatched hash, so separate machines
-using the same checkout install the same bytes. Run `bash doctor.sh` to see the
-versions actually installed on your system.
+A full `setup.sh` tool install refuses a missing, malformed, or mismatched hash,
+so separate machines using the same checkout install the same bytes. Run
+`bash doctor.sh` to see the versions actually installed on your system.
+
+System copies elsewhere on `PATH` do not suppress the pinned user-local tools.
+Setup skips an existing `~/.local/bin` tool only when the manifest says this
+project installed it and both its reported version and file hash still match.
+Any unowned file at that path is left untouched unless you explicitly pass
+`--force`. Downloads are extracted and validated in a staging directory before
+the live executable is replaced.
 
 ---
 
@@ -93,10 +100,15 @@ versions actually installed on your system.
 |---|---|---|
 | Bash ≥ 4.2 | associative arrays, `[[ ]]` features | `bash --version` |
 | `curl` or `wget` | downloading tools | `command -v curl` |
+| `sha256sum` or `shasum` | verifying downloaded and installed tool bytes | `command -v sha256sum shasum` |
 | `tar`, `gzip`, `xz` | unpacking verified release archives | `command -v tar gzip xz` |
 | `git` *(optional)* | only for `make update` | `command -v git` |
 | **en_US.UTF-8 locale** | **ble.sh needs it — missing locale causes garbage in prompt** | `locale -a \| grep en_US` |
 | `make` *(optional)* | only for the `make` targets below — `bash setup.sh` does the same job | `command -v make` |
+
+Those download and archive requirements apply to a full tool installation.
+`bash setup.sh --skip-tools` remains available for dotfile deployment and repair
+even when `tools.lock`, curl/wget, or the archive utilities are unavailable.
 
 **Keep the clone where it is.** Every deployed file is a symlink back into this
 repository, so moving or deleting it after install breaks your shell config. If you
@@ -146,7 +158,7 @@ Run `make` (or `make help`) to see all available targets:
 | `make uninstall-dry` | Preview exactly what uninstall would remove |
 | `make restore` | Uninstall and restore a backup — `BACKUP=<timestamp>` to pick one |
 | `make restore-only` | Restore a backup **without** uninstalling |
-| `make purge-tools` | Uninstall and remove all tool binaries |
+| `make purge-tools` | Uninstall and remove manifest-owned tool binaries |
 | `make list-backups` | List available backups |
 | `make prune-backups` | Delete all but the newest backups — `KEEP=<n>` (default 5) |
 | `make lint` | `bash -n` + shellcheck every script |
@@ -173,7 +185,7 @@ You can also invoke the scripts directly if you prefer:
 | *(none)* | Install all tools + deploy dotfiles |
 | `--dry-run` | Show what would happen, change nothing |
 | `--skip-tools` | Deploy dotfiles only (tools already installed) |
-| `--force` | Re-install tools even if already present |
+| `--force` | Replace local tool installations and record project ownership |
 | `-V`, `--version` | Print the version and exit |
 | `-h`, `--help` | Print usage, examples, and recovery hints, then exit |
 
@@ -187,7 +199,7 @@ You can also invoke the scripts directly if you prefer:
 | `--restore` | Uninstall, then restore a backup |
 | `--restore=TIMESTAMP` | Restore a specific backup (see `--list-backups`) |
 | `--restore-only[=TS]` | Restore a backup *without* uninstalling |
-| `--purge-tools` | Also remove tool binaries (starship, fzf, zoxide, ble.sh) |
+| `--purge-tools` | Also remove manifest-owned tools (starship, fzf, zoxide, ble.sh) |
 | `--list-backups` | List available backups and exit |
 | `--prune-backups[=N]` | Delete all but the newest N backups (default 5) and exit |
 | `--delete-backup=TS` | Delete one backup and exit |
@@ -217,14 +229,14 @@ Maintainers can advance the pins with `make tools-update`; see
 make uninstall-dry                              # preview exactly what would be removed
 make restore                                    # remove symlinks + restore your backup
 make restore BACKUP=20250604_142301             # restore one specific backup
-make purge-tools                                # also remove tool binaries
+make purge-tools                                # also remove manifest-owned tools
 
 # Or with the script directly:
 bash uninstall.sh --dry-run                     # preview what would be removed
 bash uninstall.sh --list-backups                # show available timestamps
 bash uninstall.sh --restore=20250604_142301     # restore a specific backup
 bash uninstall.sh --restore-only=20250604_142301  # restore without uninstalling
-bash uninstall.sh --restore --purge-tools       # full removal including binaries
+bash uninstall.sh --restore --purge-tools       # full removal including owned tools
 bash uninstall.sh --yes                         # no prompts (scripts, CI, ssh)
 ```
 
@@ -237,6 +249,7 @@ back to the newest on disk. Pass `--restore=TIMESTAMP` to be explicit.
 - Reads the install manifest to know *exactly* which symlinks `setup.sh` created
 - Verifies each symlink points back into this repo before touching it
 - Falls back to a hardcoded default list if no manifest exists
+- Removes tool binaries only when the manifest records that this project installed or explicitly took ownership of them; same-name user binaries are left alone
 - Never removes system packages (`bash-completion` stays)
 - Always asks for confirmation before removing anything, and again before `--purge-tools`
 - Without a terminal to ask, it **exits 1 instead of doing nothing quietly** — pass `--yes` to proceed
@@ -708,8 +721,10 @@ For a personal addition that doesn't require touching `setup.sh`, skip step 2 an
 
 `make update` pulls the newest repository release and reinstalls the versions that
 release pins. `make update-tools` leaves the checkout unchanged and reinstalls its
-current pins. Re-running `bash setup.sh` without `--force` skips tools already on
-`PATH`.
+current pins. Re-running `bash setup.sh` without `--force` skips an existing
+`~/.local/bin` tool only when the manifest records project ownership and the
+binary's version and installed-file hash still match. An unowned binary at that
+managed path is never overwritten implicitly.
 
 Maintainers update the lock in a reviewable step:
 
@@ -724,7 +739,8 @@ make update-tools                           # install exactly those reviewed byt
 `make tools-lock` re-downloads the versions already pinned and recomputes every
 hash. The lock is replaced only after all platform assets download successfully.
 After installing, open a new terminal and run `bash doctor.sh` to verify everything
-is consistent.
+is consistent. Release discovery uses the GitHub API; set `GITHUB_TOKEN` or
+`GH_TOKEN` if an unauthenticated check reaches GitHub's rate limit.
 
 ---
 

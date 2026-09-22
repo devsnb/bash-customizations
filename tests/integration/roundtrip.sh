@@ -87,6 +87,13 @@ assert_file_contains "$HOME/.bashrc" "# === BEGIN bash-customizations ===" "HEAD
 assert_file_contains "$HOME/.bashrc" "# === BEGIN bash-customizations-attach ===" "TAIL block injected"
 assert_file_contains "$HOME/.bashrc" "$ORIGINAL_BASHRC_MARKER" "the user's own .bashrc content is preserved"
 
+manifest="$HOME/.local/share/bash-customizations/manifest"
+assert_eq "4" "$(grep -c '^TOOL=' "$manifest")" \
+    "the manifest records ownership of all four installed tools"
+for tool in starship fzf zoxide blesh; do
+    assert_file_contains "$manifest" "TOOL=${tool}:" "the manifest owns ${tool}"
+done
+
 mode="$(stat -c '%a' "$HOME/.bashrc")"
 assert_eq "644" "$mode" ".bashrc keeps its original permissions"
 
@@ -115,6 +122,8 @@ assert_eq "1" "$(count_blocks '# === BEGIN bash-customizations-attach ===')" \
     "exactly one TAIL block after re-running"
 assert_eq "$backups_before" "$(backup_count)" \
     "re-running creates no redundant backup"
+assert_eq "4" "$(grep -c '^TOOL=' "$manifest")" \
+    "a dotfile-only re-run preserves tool ownership"
 
 # The manifest's BACKUP= is what --restore resolves to by default, so a re-run
 # must not blank it — otherwise restore quietly degrades to "newest on disk".

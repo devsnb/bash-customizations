@@ -269,6 +269,109 @@ out=$(bash "${REPO_DIR}/uninstall.sh" --prune-backups=abc 2>&1 || true)
 assert_contains "$out" "expects a number" "uninstall validates --prune-backups=N"
 
 # ═════════════════════════════════════════════════════════════════════════════
+suite "installer ownership and atomic replacement"
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Dotfile recovery must not depend on the tool lock or any download path.  Use a
+# deliberately incomplete copy (no tools.lock) so an accidental validation call
+# cannot pass merely because the developer machine has everything installed.
+SKIP_REPO="${WORK}/skip-repo"
+mkdir -p "${SKIP_REPO}/lib" "${SKIP_REPO}/bash" "${WORK}/skip-home"
+cp "${REPO_DIR}/setup.sh" "${REPO_DIR}/VERSION" \
+   "${REPO_DIR}/.blerc" "${REPO_DIR}/starship.toml" "$SKIP_REPO/"
+cp "${REPO_DIR}/lib/"*.sh "${SKIP_REPO}/lib/"
+cp "${REPO_DIR}/bash/"*.sh "${SKIP_REPO}/bash/"
+assert_exit 0 "--skip-tools works without tools.lock" \
+    env HOME="${WORK}/skip-home" \
+        XDG_CONFIG_HOME="${WORK}/skip-home/.config" \
+        XDG_DATA_HOME="${WORK}/skip-home/.local/share" \
+        bash "${SKIP_REPO}/setup.sh" --skip-tools
+
+# A system fzf elsewhere on PATH must not suppress the pinned ~/.local/bin copy;
+# a conflicting file at the managed path, however, needs explicit ownership.
+DECISION_HOME="${WORK}/decision-home"
+mkdir -p "${DECISION_HOME}/.local/bin" "${WORK}/system-bin"
+printf '#!/usr/bin/env bash\necho "1.0.0"\n' > "${WORK}/system-bin/fzf"
+chmod +x "${WORK}/system-bin/fzf"
+decisions=$(HOME="$DECISION_HOME" PATH="${WORK}/system-bin:${PATH}" \
+    bash --norc -c '
+        source "$1/setup.sh"
+        if binary_install_decision fzf 9.9.9 >/dev/null 2>&1; then echo -n 0; else echo -n $?; fi
+        printf " "
+        printf "#!/usr/bin/env bash\\necho 9.9.9\\n" > "$LOCAL_BIN/fzf"; chmod +x "$LOCAL_BIN/fzf"
+        if binary_install_decision fzf 9.9.9 >/dev/null 2>&1; then echo -n 0; else echo -n $?; fi
+        printf " "
+        printf "#!/usr/bin/env bash\\necho 1.0.0\\n" > "$LOCAL_BIN/fzf"; chmod +x "$LOCAL_BIN/fzf"
+        if binary_install_decision fzf 9.9.9 >/dev/null 2>&1; then echo -n 0; else echo -n $?; fi
+        printf " "
+        PREVIOUS_MANAGED_TOOLS=(fzf:1.0.0:0000000000000000000000000000000000000000000000000000000000000000)
+        if binary_install_decision fzf 9.9.9 >/dev/null 2>&1; then echo -n 0; else echo -n $?; fi
+        printf " "
+        printf "#!/usr/bin/env bash\\necho 9.9.9\\n" > "$LOCAL_BIN/fzf"; chmod +x "$LOCAL_BIN/fzf"
+        owned_sha="$(bc_sha256 "$LOCAL_BIN/fzf")"
+        PREVIOUS_MANAGED_TOOLS=("fzf:9.9.9:${owned_sha}")
+        if binary_install_decision fzf 9.9.9 >/dev/null 2>&1; then echo -n 0; else echo -n $?; fi
+        printf " "
+        printf "#!/usr/bin/env bash\\necho 9.9.9 # changed bytes\\n" > "$LOCAL_BIN/fzf"; chmod +x "$LOCAL_BIN/fzf"
+        if binary_install_decision fzf 9.9.9 >/dev/null 2>&1; then echo -n 0; else echo -n $?; fi
+    ' _ "$REPO_DIR")
+assert_eq "0 2 2 0 1 0" "$decisions" \
+    "install decisions distinguish PATH, ownership and changed bytes"
+
+# Failed staging must not write through the live executable.
+ATOMIC_HOME="${WORK}/atomic-home"
+mkdir -p "${ATOMIC_HOME}/.local/bin" "${WORK}/empty-archive" "${WORK}/good-archive"
+printf '#!/usr/bin/env bash\necho 1.0.0\n' > "${ATOMIC_HOME}/.local/bin/fzf"
+chmod +x "${ATOMIC_HOME}/.local/bin/fzf"
+tar -czf "${WORK}/missing-fzf.tar.gz" -C "${WORK}/empty-archive" .
+printf '#!/usr/bin/env bash\necho 9.9.9\n' > "${WORK}/good-archive/fzf"
+chmod +x "${WORK}/good-archive/fzf"
+tar -czf "${WORK}/good-fzf.tar.gz" -C "${WORK}/good-archive" fzf
+
+assert_exit 1 "a malformed archive fails before replacing the live binary" \
+    env HOME="$ATOMIC_HOME" FIXTURE="${WORK}/missing-fzf.tar.gz" bash --norc -c '
+        source "$1/setup.sh"
+        fetch_verified() { cp "$FIXTURE" "$4"; }
+        install_verified_binary fzf 9.9.9 linux_x86_64
+    ' _ "$REPO_DIR"
+assert_eq "1.0.0" "$("${ATOMIC_HOME}/.local/bin/fzf" --version)" \
+    "a failed staged install preserves the previous binary"
+
+assert_exit 0 "a validated staged binary is activated" \
+    env HOME="$ATOMIC_HOME" FIXTURE="${WORK}/good-fzf.tar.gz" bash --norc -c '
+        source "$1/setup.sh"
+        fetch_verified() { cp "$FIXTURE" "$4"; }
+        install_verified_binary fzf 9.9.9 linux_x86_64
+    ' _ "$REPO_DIR"
+assert_eq "9.9.9" "$("${ATOMIC_HOME}/.local/bin/fzf" --version)" \
+    "atomic activation installs the expected version"
+
+# Purge follows TOOL records, not filenames.  fzf and ble.sh deliberately look
+# managed but are absent from the fixture manifest and must survive.
+PURGE_HOME="${WORK}/purge-home"
+mkdir -p "${PURGE_HOME}/.local/bin" \
+         "${PURGE_HOME}/.local/share/bash-customizations" \
+         "${PURGE_HOME}/.local/share/blesh"
+printf '#!/usr/bin/env bash\n' > "${PURGE_HOME}/.local/bin/starship"
+printf '#!/usr/bin/env bash\n' > "${PURGE_HOME}/.local/bin/fzf"
+printf '# user-owned ble.sh\n' > "${PURGE_HOME}/.local/share/blesh/ble.sh"
+printf 'REPO=%s\nTOOL=starship:9.9.9:%064d\nTOOL=fzf:9.9.9\n' "$REPO_DIR" 0 \
+    > "${PURGE_HOME}/.local/share/bash-customizations/manifest"
+assert_exit 0 "tool purge succeeds with an ownership manifest" \
+    env HOME="$PURGE_HOME" XDG_DATA_HOME="${PURGE_HOME}/.local/share" bash --norc -c '
+        source "$1/uninstall.sh"
+        ASSUME_YES=true
+        read_manifest
+        purge_tools
+    ' _ "$REPO_DIR"
+assert_absent "${PURGE_HOME}/.local/bin/starship" "purge removes an owned binary"
+assert_exists "${PURGE_HOME}/.local/bin/fzf" "purge preserves an unowned same-name binary"
+assert_exists "${PURGE_HOME}/.local/share/blesh/ble.sh" "purge preserves an unowned ble.sh directory"
+
+assert_eq "0" "$(grep -cE 'make .*test-docker' "${REPO_DIR}/tools/release.sh" || true)" \
+    "release checks do not invoke the Docker suite a second time"
+
+# ═════════════════════════════════════════════════════════════════════════════
 suite "tools.lock — completeness, platforms and verification"
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -393,6 +496,15 @@ assert_eq "4" "$(grep -cE '^[A-Z]+_VERSION=' "${LOCK_REPO}/tools.lock")" \
     "a named lock refresh does not drop unselected tool versions"
 assert_eq "13" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${LOCK_REPO}/tools.lock")" \
     "a named lock refresh does not drop unselected platform hashes"
+
+printf '%s\n' '#!/usr/bin/env bash' \
+    'echo "curl: (22) The requested URL returned error: 403" >&2' \
+    'exit 22' > "${LOCK_REPO}/stub-bin/curl"
+chmod +x "${LOCK_REPO}/stub-bin/curl"
+rate_out=$(env PATH="${LOCK_REPO}/stub-bin:${PATH}" \
+    bash "${LOCK_REPO}/tools/lock-tools.sh" --check fzf 2>&1 || true)
+assert_contains "$rate_out" "rate limit" "GitHub API 403s get a specific diagnostic"
+assert_contains "$rate_out" "GITHUB_TOKEN" "the rate-limit diagnostic names the remedy"
 
 for target in tools-lock tools-update tools-outdated; do
     assert_exit 0 "make ${target} is wired" make -s -n -C "$REPO_DIR" "$target"

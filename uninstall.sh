@@ -11,7 +11,7 @@
 #   3. Removes those symlinks.
 #   4. Optionally restores a backup — the one recorded in the manifest by
 #      default (NOT simply the newest on disk), or one chosen by timestamp.
-#   5. Optionally removes tool binaries (starship, fzf, zoxide, ble.sh).
+#   5. Optionally removes tool binaries recorded as owned in the manifest.
 #
 # Usage:
 #   bash uninstall.sh                   # remove symlinks only (leaves backups)
@@ -26,7 +26,8 @@
 #   bash uninstall.sh --yes             # never prompt (required without a TTY)
 #
 # Safety rules:
-#   - Never removes a file that is not a symlink into this repo.
+#   - Never removes a file that is not a symlink into this repo, except tool
+#     paths explicitly recorded as installed by setup.sh in the manifest.
 #   - Never touches system-level files (bash-completion stays — it's a package).
 #   - Warns loudly if the manifest is missing and falls back to known defaults.
 #   - Always asks for confirmation before destructive steps; without a terminal
@@ -161,7 +162,7 @@ parse_args() {
                 echo "  --restore               Remove symlinks + restore a backup"
                 echo "  --restore=TIMESTAMP     Restore a specific backup (see --list-backups)"
                 echo "  --restore-only[=TS]     Restore a backup WITHOUT uninstalling"
-                echo "  --purge-tools           Also remove tool binaries (starship, fzf, zoxide, ble.sh)"
+                echo "  --purge-tools           Also remove tools owned in the install manifest"
                 echo "  --list-backups          List available backups and exit"
                 echo "  --prune-backups[=N]     Delete all but the newest N backups (default ${PRUNE_KEEP_DEFAULT}) and exit"
                 echo "  --delete-backup=TS      Delete one backup by timestamp and exit"
@@ -198,9 +199,16 @@ parse_args() {
 MANIFEST_REPO=""
 MANIFEST_BACKUP=""
 MANIFEST_LINKS=()
+MANIFEST_TOOLS=()
 MANIFEST_GUARD_ADDED=false
 
 read_manifest() {
+    MANIFEST_REPO=""
+    MANIFEST_BACKUP=""
+    MANIFEST_LINKS=()
+    MANIFEST_TOOLS=()
+    MANIFEST_GUARD_ADDED=false
+
     if [[ ! -f "$MANIFEST_FILE" ]]; then
         log_warn "Manifest not found at: ${MANIFEST_FILE}"
         log_warn "Falling back to known default deployment targets."
@@ -216,12 +224,21 @@ read_manifest() {
             REPO)         MANIFEST_REPO="$value"         ;;
             BACKUP)       MANIFEST_BACKUP="$value"       ;;
             LINK)         MANIFEST_LINKS+=("$value")     ;;
+            TOOL)
+                if [[ "$value" =~ ^(starship|fzf|zoxide|blesh):[^:]+:[0-9a-f]{64}$ ]]; then
+                    MANIFEST_TOOLS+=("$value")
+                else
+                    log_warn "Ignoring invalid TOOL record in manifest: ${value}"
+                fi
+                ;;
             GUARD_ADDED)  [[ "$value" == "true" ]] && MANIFEST_GUARD_ADDED=true ;;
         esac
     done < "$MANIFEST_FILE"
 
     if [[ -z "$MANIFEST_REPO" ]]; then
         log_warn "Manifest has no REPO entry. Falling back to defaults."
+        # A malformed manifest is not sufficient proof of tool ownership.
+        MANIFEST_TOOLS=()
         _use_default_targets
     fi
 }
@@ -515,11 +532,21 @@ restore_backup() {
 purge_tools() {
     log_section "Purging tool binaries"
 
-    echo -e "${YELLOW}This will remove the following binaries and directories:${RESET}"
-    echo "  ~/.local/bin/starship"
-    echo "  ~/.local/bin/fzf     (and ~/.fzf/ if it exists)"
-    echo "  ~/.local/bin/zoxide"
-    echo "  ~/.local/share/blesh/"
+    if [[ ${#MANIFEST_TOOLS[@]} -eq 0 ]]; then
+        log_warn "The manifest records no tool installations owned by bash-customizations."
+        log_warn "No binaries or directories will be removed."
+        return 0
+    fi
+
+    echo -e "${YELLOW}This will remove the tool paths owned in the install manifest:${RESET}"
+    local record name
+    for record in "${MANIFEST_TOOLS[@]}"; do
+        name="${record%%:*}"
+        case "$name" in
+            starship|fzf|zoxide) echo "  ~/.local/bin/${name}" ;;
+            blesh)               echo "  ${XDG_DATA_HOME}/blesh/" ;;
+        esac
+    done
     echo
     echo -e "${YELLOW}bash-completion is a system package and will NOT be touched.${RESET}"
     echo
@@ -529,22 +556,13 @@ purge_tools() {
     fi
     PURGED=true
 
-    # ── starship ──────────────────────────────────────────────────────────────
-    _remove_bin "starship"
+    for name in starship fzf zoxide; do
+        _tool_owned "$name" && _remove_bin "$name"
+    done
 
-    # ── fzf ───────────────────────────────────────────────────────────────────
-    _remove_bin "fzf"
-    if [[ -d "${HOME}/.fzf" ]]; then
-        run rm -rf "${HOME}/.fzf"
-        report "Removed: ~/.fzf/" "Would remove: ~/.fzf/"
-    fi
-
-    # ── zoxide ────────────────────────────────────────────────────────────────
-    _remove_bin "zoxide"
-
-    # ── ble.sh ────────────────────────────────────────────────────────────────
+    # ble.sh is a directory rather than one executable.
     local blesh_dir="${XDG_DATA_HOME}/blesh"
-    if [[ -d "$blesh_dir" ]]; then
+    if _tool_owned blesh && [[ -d "$blesh_dir" ]]; then
         # Warn if ble.sh has an active session in this terminal.  Removing its
         # directory while it is running deletes the temp files it needs, causing
         # a flood of "No such file or directory" errors on every prompt redraw.
@@ -560,16 +578,24 @@ purge_tools() {
         fi
         run rm -rf "$blesh_dir"
         report "Removed: ${blesh_dir}" "Would remove: ${blesh_dir}"
-    else
+    elif _tool_owned blesh; then
         log_skip "ble.sh dir not found: ${blesh_dir}"
     fi
+}
+
+_tool_owned() {
+    local name="$1" record
+    for record in "${MANIFEST_TOOLS[@]+"${MANIFEST_TOOLS[@]}"}"; do
+        [[ "${record%%:*}" == "$name" ]] && return 0
+    done
+    return 1
 }
 
 _remove_bin() {
     local name="$1"
     local bin_path="${LOCAL_BIN}/${name}"
-    # -e is false for a dangling symlink (setup.sh links ~/.local/bin/fzf into
-    # ~/.fzf/bin), so test -L too or the link is left on PATH forever.
+    # -e is false for a dangling symlink, so test -L too or an owned link could
+    # be left on PATH forever.
     if [[ -e "$bin_path" || -L "$bin_path" ]]; then
         run rm "$bin_path"
         report "Removed: ${bin_path}" "Would remove: ${bin_path}"
@@ -808,4 +834,6 @@ main() {
     if ! $DRY_RUN; then print_done; fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

@@ -87,7 +87,7 @@ restore: ## Uninstall and restore a backup (BACKUP=<timestamp> to choose one)
 restore-only: ## Restore a backup WITHOUT uninstalling (BACKUP=<timestamp>)
 	@bash $(REPO_DIR)/uninstall.sh $(subst --restore,--restore-only,$(RESTORE_ARG))
 
-purge-tools: ## Uninstall and remove tool binaries (starship, fzf, zoxide, ble.sh)
+purge-tools: ## Uninstall and remove manifest-owned tool binaries
 	@bash $(REPO_DIR)/uninstall.sh --purge-tools
 
 list-backups: ## List available backup timestamps

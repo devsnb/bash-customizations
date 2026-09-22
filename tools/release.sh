@@ -214,16 +214,20 @@ else
     log_warn "Skipping the container round trip (--no-docker) — CI still runs it on the tag."
 fi
 # shellcheck disable=SC2086  # check_target is a deliberate multi-word target list
-if ! make -C "$REPO_DIR" $check_target; then
+check_log="$(mktemp)"
+trap 'rm -f "$check_log"' EXIT
+if ! make -C "$REPO_DIR" $check_target 2>&1 | tee "$check_log"; then
     die "make ${check_target} failed — nothing has been changed." \
         "Fix the failures, then run the release again."
 fi
 
 # `make check` passes when Docker is unreachable, because tests/docker.sh skips
 # by design.  Say so plainly rather than letting a release look fully tested.
-if $RUN_DOCKER && make -C "$REPO_DIR" test-docker 2>&1 | grep -q '^SKIP:'; then
+if $RUN_DOCKER && grep -q '^SKIP:' "$check_log"; then
     log_warn "The container round trip SKIPPED (no Docker) — CI will run it on the tag."
 fi
+rm -f "$check_log"
+trap - EXIT
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Build the new files (both modes build them; only the real mode installs them)

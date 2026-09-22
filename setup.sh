@@ -4,7 +4,7 @@
 # Idempotent setup script for the bash-customizations dotfile repo.
 #
 # What it does (in order):
-#   1. Checks prerequisites (Bash ≥ 4.2, curl/wget, tar, gzip, xz)
+#   1. Checks prerequisites (Bash ≥ 4.2; download tools only for a full install)
 #   1.5. Ensures en_US.UTF-8 locale is installed (required by ble.sh)
 #   2. Installs: starship · ble.sh · bash-completion · fzf · zoxide
 #   3. Deploys dotfiles (.bashrc · .bash/ · .blerc · starship.toml)
@@ -16,8 +16,8 @@
 #   bash setup.sh --dry-run    # show what would happen, change nothing
 #   bash setup.sh --skip-tools # deploy dotfiles only (tools already installed)
 #
-# Re-running is safe — already-installed tools and already-deployed files are
-# detected and skipped, unless --force is passed.
+# Re-running is safe — manifest-owned tools at the pinned version and
+# already-deployed files are detected and skipped, unless --force is passed.
 #
 # Tool versions are read from tools.lock and verified by SHA256 before install.
 # bash-completion is the exception: it comes from the system package manager.
@@ -55,8 +55,12 @@ BLOCK_HEAD_END="# === END bash-customizations ==="
 BLOCK_TAIL_BEGIN="# === BEGIN bash-customizations-attach ==="
 BLOCK_TAIL_END="# === END bash-customizations-attach ==="
 
-# Runtime tracking (populated by deploy_file / _ensure_noninteractive_guard)
+# Runtime tracking (populated by deploy_file / _ensure_noninteractive_guard and
+# the tool installers).  TOOL records hold name, version and installed-file
+# hash; they are the ownership boundary used by uninstall.sh --purge-tools.
 DEPLOYED_LINKS=()
+PREVIOUS_MANAGED_TOOLS=()
+MANAGED_TOOLS=()
 BACKUP_CREATED=false
 GUARD_ADDED=false
 
@@ -71,9 +75,9 @@ FORCE=false
 
 # Palette, glyphs, log_* and has() are shared with doctor.sh and uninstall.sh.
 if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" \
-   || ! -f "${REPO_DIR}/lib/tools.sh" || ! -f "${REPO_DIR}/tools.lock" ]]; then
+   || ! -f "${REPO_DIR}/lib/tools.sh" ]]; then
     echo "setup.sh: required files are missing from ${REPO_DIR}" >&2
-    echo "          Expected lib/log.sh, lib/version.sh, lib/tools.sh and tools.lock." >&2
+    echo "          Expected lib/log.sh, lib/version.sh and lib/tools.sh." >&2
     echo "          The repository looks incomplete — re-clone it and try again." >&2
     exit 1
 fi
@@ -312,6 +316,153 @@ tool_version() {
     bc_tool_version "$1"
 }
 
+# load_tool_ownership — retain TOOL=name:version records from the previous
+# manifest.  Dotfile-only re-runs must not accidentally forget who owns the
+# binaries, and upgrades need the old version to decide whether replacement is
+# safe without --force.
+load_tool_ownership() {
+    local value
+    [[ -r "$MANIFEST_FILE" ]] || return 0
+    while IFS= read -r value; do
+        value="${value#TOOL=}"
+        [[ "$value" =~ ^(starship|fzf|zoxide|blesh):[^:]+:[0-9a-f]{64}$ ]] || continue
+        case "${value%%:*}" in
+            starship|fzf|zoxide|blesh) PREVIOUS_MANAGED_TOOLS+=("$value") ;;
+        esac
+    done < <(grep '^TOOL=' "$MANIFEST_FILE" 2>/dev/null || true)
+
+    if $SKIP_TOOLS; then
+        MANAGED_TOOLS=("${PREVIOUS_MANAGED_TOOLS[@]+"${PREVIOUS_MANAGED_TOOLS[@]}"}")
+    fi
+}
+
+managed_tool_version() {
+    local name="$1" record value
+    for record in "${PREVIOUS_MANAGED_TOOLS[@]+"${PREVIOUS_MANAGED_TOOLS[@]}"}"; do
+        [[ "${record%%:*}" == "$name" ]] || continue
+        value="${record#*:}"
+        printf '%s\n' "${value%%:*}"
+        return 0
+    done
+    return 1
+}
+
+managed_tool_sha() {
+    local name="$1" record value
+    for record in "${PREVIOUS_MANAGED_TOOLS[@]+"${PREVIOUS_MANAGED_TOOLS[@]}"}"; do
+        [[ "${record%%:*}" == "$name" ]] || continue
+        value="${record#*:}"
+        [[ "$value" == *:* ]] || return 1
+        printf '%s\n' "${value#*:}"
+        return 0
+    done
+    return 1
+}
+
+record_managed_tool() {
+    local name="$1" version="$2" sha="$3" record
+    for record in "${MANAGED_TOOLS[@]+"${MANAGED_TOOLS[@]}"}"; do
+        [[ "${record%%:*}" == "$name" ]] && return 0
+    done
+    MANAGED_TOOLS+=("${name}:${version}:${sha}")
+}
+
+# installed_binary_version NAME — normalise the first dotted version printed by
+# a local managed binary.  It deliberately addresses LOCAL_BIN directly: a
+# system binary elsewhere on PATH must not suppress installation of the pin.
+installed_binary_version() {
+    local name="$1" output
+    [[ -x "${LOCAL_BIN}/${name}" ]] || return 1
+    output="$("${LOCAL_BIN}/${name}" --version 2>/dev/null | head -1)" || return 1
+    printf '%s\n' "$output" | grep -oE 'v?[0-9]+([.][0-9]+)+' | head -1 | sed 's/^v//'
+}
+
+# binary_install_decision NAME VERSION
+#   0 = install/upgrade, 1 = already pinned (skip), 2 = unowned conflict.
+binary_install_decision() {
+    local name="$1" version="$2" target="${LOCAL_BIN}/${1}" found="" found_sha=""
+    local owned_version="" owned_sha=""
+    owned_version="$(managed_tool_version "$name" 2>/dev/null || true)"
+    owned_sha="$(managed_tool_sha "$name" 2>/dev/null || true)"
+
+    if [[ ! -e "$target" && ! -L "$target" ]]; then
+        return 0
+    fi
+    if [[ -d "$target" && ! -L "$target" ]]; then
+        log_error "${target} is a directory; refusing to replace it with an executable."
+        return 2
+    fi
+    if $FORCE; then
+        return 0
+    fi
+
+    found="$(installed_binary_version "$name" 2>/dev/null || true)"
+    found_sha="$(bc_sha256 "$target" 2>/dev/null || true)"
+    if [[ "$found" == "$version" && "$owned_version" == "$version" \
+        && -n "$owned_sha" && "$found_sha" == "$owned_sha" ]]; then
+        record_managed_tool "$name" "$version" "$found_sha"
+        log_ok "${name} ${version} already installed at ${target}"
+        return 1
+    fi
+    if [[ -n "$owned_version" ]]; then
+        return 0
+    fi
+
+    log_error "${target} already exists and is not owned by bash-customizations."
+    log_error "  Found version: ${found:-unknown}; pinned version: ${version}"
+    log_error "  Move it aside, or use --force to replace it and record ownership."
+    return 2
+}
+
+# install_verified_binary NAME VERSION PLATFORM — stage, validate, then rename
+# the binary into place.  Extraction never writes through the live path, so a
+# corrupt archive or failed validation leaves the previous executable intact.
+install_verified_binary() {
+    local name="$1" version="$2" platform="$3"
+    local blob stage staged found previous_link=""
+    mkdir -p "$LOCAL_BIN"
+    blob="$(mktemp)"
+    stage="$(mktemp -d "${LOCAL_BIN}/.${name}.install.XXXXXX")"
+
+    if ! fetch_verified "$name" "$platform" "$version" "$blob" \
+        || ! tar -xzf "$blob" -C "$stage" "$name"; then
+        log_error "${name}: could not download or unpack the verified archive"
+        rm -rf "$blob" "$stage"
+        return 1
+    fi
+
+    staged="${stage}/${name}"
+    chmod +x "$staged"
+    found="$("$staged" --version 2>/dev/null | head -1 \
+        | grep -oE 'v?[0-9]+([.][0-9]+)+' | head -1 | sed 's/^v//' || true)"
+    if [[ "$found" != "$version" ]]; then
+        log_error "${name}: staged binary reports ${found:-no version}, expected ${version}"
+        rm -rf "$blob" "$stage"
+        return 1
+    fi
+
+    # mv can interpret a symlink-to-directory as a directory destination on
+    # some systems.  Rename the link aside first and restore it on failure.
+    if [[ -L "${LOCAL_BIN}/${name}" ]]; then
+        previous_link="${stage}/previous-link"
+        if ! mv "${LOCAL_BIN}/${name}" "$previous_link"; then
+            log_error "${name}: could not stage the previous symlink"
+            rm -rf "$blob" "$stage"
+            return 1
+        fi
+    fi
+    if ! mv -f "$staged" "${LOCAL_BIN}/${name}"; then
+        log_error "${name}: could not replace ${LOCAL_BIN}/${name}"
+        [[ -n "$previous_link" ]] && mv "$previous_link" "${LOCAL_BIN}/${name}" 2>/dev/null || true
+        rm -rf "$blob" "$stage"
+        return 1
+    fi
+    rm -rf "$blob" "$stage"
+    found="$(bc_sha256 "${LOCAL_BIN}/${name}")"
+    record_managed_tool "$name" "$version" "$found"
+    log_ok "${name} installed: $("${LOCAL_BIN}/${name}" --version 2>/dev/null | head -1)"
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Parse CLI arguments
 # ══════════════════════════════════════════════════════════════════════════════
@@ -328,7 +479,7 @@ parse_args() {
                 echo
                 echo "  --dry-run     Show what would happen without making changes"
                 echo "  --skip-tools  Deploy dotfiles only, skip tool installation"
-                echo "  --force       Overwrite existing installations"
+                echo "  --force       Replace local tools and record project ownership"
                 echo "  -V, --version Print the version and exit"
                 echo
                 echo "Examples:"
@@ -357,12 +508,6 @@ parse_args() {
 check_prerequisites() {
     log_section "Checking prerequisites"
 
-    if ! bc_tools_validate; then
-        log_error "tools.lock is incomplete or malformed; refusing to download tools."
-        log_error "  Restore it from git or regenerate it with: make tools-update"
-        exit 1
-    fi
-
     # Bash version ≥ 4.2
     local bash_major="${BASH_VERSINFO[0]}" bash_minor="${BASH_VERSINFO[1]}"
     if (( bash_major < 4 || ( bash_major == 4 && bash_minor < 2 ) )); then
@@ -371,6 +516,23 @@ check_prerequisites() {
         exit 1
     fi
     log_ok "Bash ${BASH_VERSION}"
+
+    # Dotfile deployment needs only Bash and the ordinary core utilities used
+    # to create links and rewrite ~/.bashrc.  In particular, --skip-tools is the
+    # recovery path when tools.lock or a downloader/unpacker is unavailable.
+    if $SKIP_TOOLS; then
+        return 0
+    fi
+
+    if ! bc_tools_validate; then
+        log_error "tools.lock is incomplete or malformed; refusing to download tools."
+        log_error "  Restore it from git or regenerate it with: make tools-update"
+        exit 1
+    fi
+    if ! bc_sha256 /dev/null >/dev/null 2>&1; then
+        log_error "sha256sum or shasum is required to verify downloaded and installed tools."
+        exit 1
+    fi
 
     # curl or wget
     if ! has curl && ! has wget; then
@@ -407,15 +569,13 @@ check_prerequisites() {
 
     # Say up front that some steps need root, rather than surprising the user
     # with a password prompt halfway through the run.
-    if ! $SKIP_TOOLS; then
-        if [[ $EUID -eq 0 ]]; then
-            log_info "Running as root — package installs will not use sudo."
-        elif has sudo; then
-            log_info "Some optional steps (bash-completion, locale) may ask for your sudo password."
-        else
-            log_warn "No sudo available — package installs and locale generation will be skipped."
-            log_warn "Everything installed into ~/.local/bin works without root."
-        fi
+    if [[ $EUID -eq 0 ]]; then
+        log_info "Running as root — package installs will not use sudo."
+    elif has sudo; then
+        log_info "Some optional steps (bash-completion, locale) may ask for your sudo password."
+    else
+        log_warn "No sudo available — package installs and locale generation will be skipped."
+        log_warn "Everything installed into ~/.local/bin works without root."
     fi
 
     # make is not required by this setup (ble.sh installs from a pre-built tarball).
@@ -450,10 +610,10 @@ install_starship() {
         log_error "starship: no version available (tools.lock unreadable?)"; return 1; }
     log_section "Starship ${version}"
 
-    if has starship && ! $FORCE; then
-        log_ok "Starship already installed: $(ver starship)"
-        return 0
-    fi
+    local decision=0
+    binary_install_decision starship "$version" || decision=$?
+    [[ "$decision" -eq 1 ]] && return 0
+    [[ "$decision" -eq 2 ]] && return 1
 
     local platform; platform="$(bc_tool_platform)" || {
         log_error "starship: unsupported platform $(uname -s)/$(uname -m)"
@@ -468,20 +628,7 @@ install_starship() {
     fi
 
     log_info "Installing Starship ${version} to ${LOCAL_BIN}…"
-    local blob; blob="$(mktemp)"
-    if ! fetch_verified starship "$platform" "$version" "$blob"; then
-        rm -f "$blob"; return 1
-    fi
-    # The tarball is a single top-level `starship` binary.
-    mkdir -p "$LOCAL_BIN"
-    if tar -xzf "$blob" -C "$LOCAL_BIN" starship; then
-        chmod +x "${LOCAL_BIN}/starship"
-        log_ok "Starship installed: $(ver starship)"
-    else
-        log_error "starship: could not unpack the archive"
-        rm -f "$blob"; return 1
-    fi
-    rm -f "$blob"
+    install_verified_binary starship "$version" "$platform"
 }
 
 # ── ble.sh ────────────────────────────────────────────────────────────────────
@@ -492,9 +639,24 @@ install_blesh() {
 
     local blesh_dir="${XDG_DATA_HOME}/blesh"
 
+    local owned_version="" owned_sha="" installed_sha="" installed_output="" commit=""
+    owned_version="$(managed_tool_version blesh 2>/dev/null || true)"
+    owned_sha="$(managed_tool_sha blesh 2>/dev/null || true)"
+    commit="${version##*+}"
     if [[ -f "${blesh_dir}/ble.sh" ]] && ! $FORCE; then
-        log_ok "ble.sh already installed at ${blesh_dir}"
-        return 0
+        installed_output="$(bash "${blesh_dir}/ble.sh" --version 2>/dev/null | head -1 || true)"
+        installed_sha="$(bc_sha256 "${blesh_dir}/ble.sh" 2>/dev/null || true)"
+        if [[ "$owned_version" == "$version" && "$installed_output" == *"+${commit}"* \
+            && -n "$owned_sha" && "$installed_sha" == "$owned_sha" ]]; then
+            record_managed_tool blesh "$version" "$installed_sha"
+            log_ok "ble.sh ${version} already installed at ${blesh_dir}"
+            return 0
+        fi
+        if [[ -z "$owned_version" ]]; then
+            log_error "${blesh_dir} already exists and is not owned by bash-customizations."
+            log_error "  Move it aside, or use --force to replace it and record ownership."
+            return 1
+        fi
     fi
 
     if $DRY_RUN; then
@@ -505,9 +667,14 @@ install_blesh() {
 
     log_info "Installing ble.sh ${version} to ${blesh_dir}…"
 
-    local blob tmp_dir
+    mkdir -p "$XDG_DATA_HOME"
+    local blob tmp_dir install_root staged_dir previous_dir staged_output
     blob="$(mktemp)"
     tmp_dir="$(mktemp -d)"
+    install_root="$(mktemp -d "${XDG_DATA_HOME}/.blesh.install.XXXXXX")"
+    staged_dir="${install_root}/blesh"
+    previous_dir="$(mktemp -d "${XDG_DATA_HOME}/.blesh.previous.XXXXXX")"
+    rmdir "$previous_dir"
     # Inline cleanup rather than a RETURN trap: bash's set -e bypasses RETURN
     # traps (it fires ERR and exits the script outright, never returning).
     local blesh_ok=false
@@ -517,15 +684,36 @@ install_blesh() {
         # so glob for the installer rather than assuming the directory name.
         local installer
         installer="$(find "$tmp_dir" -maxdepth 2 -name 'ble.sh' -type f | head -1)"
-        if [[ -n "$installer" ]] && bash "$installer" --install "${XDG_DATA_HOME}"; then
-            blesh_ok=true
+        if [[ -n "$installer" ]] && bash "$installer" --install "$install_root" \
+            && [[ -f "${staged_dir}/ble.sh" ]]; then
+            staged_output="$(bash "${staged_dir}/ble.sh" --version 2>/dev/null | head -1 || true)"
+            if [[ "$staged_output" != *"+${commit}"* ]]; then
+                log_error "ble.sh: staged install reports the wrong build: ${staged_output:-unknown}"
+                rm -rf "$tmp_dir" "$install_root" "$blob"
+                return 1
+            fi
+            if [[ -d "$blesh_dir" || -L "$blesh_dir" ]]; then
+                if ! mv "$blesh_dir" "$previous_dir"; then
+                    log_error "ble.sh: could not stage the previous installation"
+                elif mv "$staged_dir" "$blesh_dir"; then
+                    rm -rf "$previous_dir"
+                    blesh_ok=true
+                else
+                    log_error "ble.sh: could not activate the staged installation; restoring previous version"
+                    mv "$previous_dir" "$blesh_dir" 2>/dev/null || true
+                fi
+            elif mv "$staged_dir" "$blesh_dir"; then
+                blesh_ok=true
+            fi
         else
-            log_error "ble.sh: no ble.sh found in the unpacked archive"
+            log_error "ble.sh: archive did not produce a usable staged installation"
         fi
     fi
-    rm -rf "$tmp_dir" "$blob"
+    rm -rf "$tmp_dir" "$install_root" "$blob"
 
     if $blesh_ok; then
+        installed_sha="$(bc_sha256 "${blesh_dir}/ble.sh")"
+        record_managed_tool blesh "$version" "$installed_sha"
         log_ok "ble.sh installed at ${blesh_dir}"
     else
         log_error "ble.sh installation failed (download, checksum or install step)"
@@ -605,10 +793,10 @@ install_fzf() {
         log_error "fzf: no version available (tools.lock unreadable?)"; return 1; }
     log_section "fzf ${version}"
 
-    if has fzf && ! $FORCE; then
-        log_ok "fzf already installed: $(ver fzf)"
-        return 0
-    fi
+    local decision=0
+    binary_install_decision fzf "$version" || decision=$?
+    [[ "$decision" -eq 1 ]] && return 0
+    [[ "$decision" -eq 2 ]] && return 1
 
     local platform; platform="$(bc_tool_platform)" || {
         log_error "fzf: unsupported platform $(uname -s)/$(uname -m)"
@@ -627,19 +815,7 @@ install_fzf() {
     # nothing to check a hash against.  The release tarball is one file, one
     # hash, and needs neither git nor a compiler.
     log_info "Installing fzf ${version} to ${LOCAL_BIN}…"
-    local blob; blob="$(mktemp)"
-    if ! fetch_verified fzf "$platform" "$version" "$blob"; then
-        rm -f "$blob"; return 1
-    fi
-    mkdir -p "$LOCAL_BIN"
-    if tar -xzf "$blob" -C "$LOCAL_BIN" fzf; then
-        chmod +x "${LOCAL_BIN}/fzf"
-        log_ok "fzf installed: $(ver fzf)"
-    else
-        log_error "fzf: could not unpack the archive"
-        rm -f "$blob"; return 1
-    fi
-    rm -f "$blob"
+    install_verified_binary fzf "$version" "$platform"
 }
 
 # ── zoxide ────────────────────────────────────────────────────────────────────
@@ -648,10 +824,10 @@ install_zoxide() {
         log_error "zoxide: no version available (tools.lock unreadable?)"; return 1; }
     log_section "zoxide ${version}"
 
-    if has zoxide && ! $FORCE; then
-        log_ok "zoxide already installed: $(ver zoxide)"
-        return 0
-    fi
+    local decision=0
+    binary_install_decision zoxide "$version" || decision=$?
+    [[ "$decision" -eq 1 ]] && return 0
+    [[ "$decision" -eq 2 ]] && return 1
 
     local platform; platform="$(bc_tool_platform)" || {
         log_error "zoxide: unsupported platform $(uname -s)/$(uname -m)"
@@ -669,20 +845,7 @@ install_zoxide() {
     # unreleased, unpinned, unverified script running as you.  The release
     # tarball carries the same binary.
     log_info "Installing zoxide ${version} to ${LOCAL_BIN}…"
-    local blob; blob="$(mktemp)"
-    if ! fetch_verified zoxide "$platform" "$version" "$blob"; then
-        rm -f "$blob"; return 1
-    fi
-    mkdir -p "$LOCAL_BIN"
-    # The tarball also carries man pages and completions; we want the binary.
-    if tar -xzf "$blob" -C "$LOCAL_BIN" zoxide; then
-        chmod +x "${LOCAL_BIN}/zoxide"
-        log_ok "zoxide installed: $(ver zoxide)"
-    else
-        log_error "zoxide: could not unpack the archive"
-        rm -f "$blob"; return 1
-    fi
-    rm -f "$blob"
+    install_verified_binary zoxide "$version" "$platform"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1015,6 +1178,13 @@ write_manifest() {
         for link in "${DEPLOYED_LINKS[@]+"${DEPLOYED_LINKS[@]}"}" ; do
             echo "LINK=${link}"
         done
+        # Ownership, not mere presence, authorises uninstall.sh --purge-tools.
+        # Versions and hashes make upgrades auditable and let setup distinguish
+        # its own intact install from an unrelated or modified binary.
+        local tool_record
+        for tool_record in "${MANAGED_TOOLS[@]+"${MANAGED_TOOLS[@]}"}"; do
+            echo "TOOL=${tool_record}"
+        done
     } > "${MANIFEST_FILE}"
 
     log_ok "Manifest written: ${MANIFEST_FILE}"
@@ -1046,27 +1216,29 @@ verify() {
         fi
     }
 
-    _check "starship"       starship
-    _check "fzf"            fzf
-    _check "zoxide"         zoxide
+    if ! $SKIP_TOOLS; then
+        _check "starship"       starship
+        _check "fzf"            fzf
+        _check "zoxide"         zoxide
 
-    # ble.sh — not a binary, check for the file
-    local blesh_file="${XDG_DATA_HOME}/blesh/ble.sh"
-    if [[ -f "$blesh_file" ]]; then
-        log_ok "ble.sh: ${blesh_file}"
-    else
-        log_warn "ble.sh: not found at ${blesh_file}"
-        all_ok=false
-    fi
+        # ble.sh — not a binary, check for the file
+        local blesh_file="${XDG_DATA_HOME}/blesh/ble.sh"
+        if [[ -f "$blesh_file" ]]; then
+            log_ok "ble.sh: ${blesh_file}"
+        else
+            log_warn "ble.sh: not found at ${blesh_file}"
+            all_ok=false
+        fi
 
-    # bash-completion — check for the main script.  It lives in system paths and
-    # needs root to install, so its absence is advisory rather than a failure.
-    if [[ -f /usr/share/bash-completion/bash_completion ]] \
-        || [[ -f /usr/local/share/bash-completion/bash_completion ]]; then
-        log_ok "bash-completion: found"
-    else
-        log_warn "bash-completion: not found (needs root to install — optional)"
-        (( advisories++ )) || true
+        # bash-completion lives in system paths and needs root to install, so
+        # its absence is advisory rather than a failure.
+        if [[ -f /usr/share/bash-completion/bash_completion ]] \
+            || [[ -f /usr/local/share/bash-completion/bash_completion ]]; then
+            log_ok "bash-completion: found"
+        else
+            log_warn "bash-completion: not found (needs root to install — optional)"
+            (( advisories++ )) || true
+        fi
     fi
 
     # ~/.bashrc — check for injected blocks
@@ -1234,8 +1406,9 @@ ensure_locale() {
 main() {
     parse_args "$@"
     print_banner
+    load_tool_ownership
     check_prerequisites
-    ensure_locale
+    $SKIP_TOOLS || ensure_locale
 
     if ! $SKIP_TOOLS; then
         install_starship

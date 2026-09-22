@@ -10,6 +10,27 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+### Changed
+
+- Managed binaries are downloaded into a staging directory, checked for the
+  pinned version, and atomically renamed into place instead of being extracted
+  over a live executable.
+- Existing commands elsewhere on `PATH` no longer suppress the pinned
+  `~/.local/bin` installation. Conflicting unowned files at the managed path
+  require an explicit `--force` before setup replaces and claims them.
+- Tool-release discovery accepts `GITHUB_TOKEN` or `GH_TOKEN`, uses GitHub's
+  versioned JSON API, and reports rate-limit failures with an actionable fix.
+
+### Fixed
+
+- `uninstall.sh --purge-tools` now removes only tools whose ownership, version,
+  and installed-file hash were recorded by `setup.sh`; unrelated same-name
+  binaries and legacy `~/.fzf` directories are preserved.
+- `setup.sh --skip-tools` no longer requires `tools.lock`, a downloader, archive
+  utilities, tool verification, or locale setup merely to repair dotfiles.
+- Release preparation no longer runs the complete Docker round trip twice just
+  to determine whether Docker was skipped.
+
 ## [1.1.0] - 2026-09-20
 
 ### Added

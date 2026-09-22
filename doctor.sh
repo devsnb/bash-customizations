@@ -373,12 +373,19 @@ check_manifest() {
 
     pass "Manifest exists: ${MANIFEST_FILE}"
 
-    local link_count
+    local link_count tool_count
     # Use grep|wc -l (not grep -c) because grep -c exits 1 for zero matches,
     # and "|| echo 0" would then produce "0\n0" (grep's own output + echo's).
     # shellcheck disable=SC2126  # deliberate, see above
     link_count="$(grep '^LINK=' "$MANIFEST_FILE" 2>/dev/null | wc -l | tr -d ' ')"
     info "${link_count} symlink(s) recorded in manifest"
+    tool_count="$(grep -E '^TOOL=(starship|fzf|zoxide|blesh):[^:]+:[0-9a-f]{64}$' \
+        "$MANIFEST_FILE" 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$tool_count" -gt 0 ]]; then
+        info "${tool_count} project-owned tool installation(s) recorded in manifest"
+    else
+        info "No project-owned tools recorded; --purge-tools will leave binaries alone"
+    fi
 
     local repo_in_manifest
     # Strip only the leading "REPO=" — cut -d= -f2 would truncate any repo path
