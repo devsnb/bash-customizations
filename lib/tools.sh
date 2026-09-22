@@ -70,14 +70,13 @@ bc_tool_sha() {
 
 # bc_tool_platform — this machine, as "<os>_<arch>".  Returns 1 if unsupported.
 #
-# The names are normalised so the rest of the code never sees the six spellings
-# uname reports for two architectures.
+# The names are normalised so the rest of the code sees one spelling for each
+# of the two supported Linux architectures.
 bc_tool_platform() {
     local os arch
     case "$(uname -s)" in
-        Linux)   os=linux  ;;
-        Darwin)  os=darwin ;;
-        *)       return 1  ;;
+        Linux) os=linux ;;
+        *)     return 1 ;;
     esac
     case "$(uname -m)" in
         x86_64|amd64)   arch=x86_64  ;;
@@ -93,7 +92,7 @@ bc_tool_platform() {
 # shellcheck disable=SC2034
 #   Consumed by tools/lock-tools.sh and tests/unit.sh, which shellcheck analyses
 #   as separate units — the same reason lib/log.sh disables it for the palette.
-BC_TOOL_PLATFORMS=(linux_x86_64 linux_aarch64 darwin_x86_64 darwin_aarch64)
+BC_TOOL_PLATFORMS=(linux_x86_64 linux_aarch64)
 
 # bc_tools_validate — require every managed version and platform hash.
 # A malformed or partial lock must fail before setup downloads anything.
@@ -126,12 +125,8 @@ _bc_tool_triple() {
     case "$1:$2" in
         starship:linux_x86_64|zoxide:linux_x86_64)   echo x86_64-unknown-linux-musl  ;;
         starship:linux_aarch64|zoxide:linux_aarch64) echo aarch64-unknown-linux-musl ;;
-        starship:darwin_x86_64|zoxide:darwin_x86_64) echo x86_64-apple-darwin        ;;
-        starship:darwin_aarch64|zoxide:darwin_aarch64) echo aarch64-apple-darwin     ;;
-        fzf:linux_x86_64)    echo linux_amd64  ;;
-        fzf:linux_aarch64)   echo linux_arm64  ;;
-        fzf:darwin_x86_64)   echo darwin_amd64 ;;
-        fzf:darwin_aarch64)  echo darwin_arm64 ;;
+        fzf:linux_x86_64)  echo linux_amd64 ;;
+        fzf:linux_aarch64) echo linux_arm64 ;;
         *) return 1 ;;
     esac
 }
@@ -170,8 +165,8 @@ bc_tool_url() {
 
 # bc_sha256 FILE — print the SHA256 of a file, or return 1 if nothing can.
 #
-# sha256sum is GNU coreutils; macOS ships shasum instead.  Both print
-# "<hash>  <name>", so the same cut works for either.
+# Linux distributions normally provide sha256sum; shasum is accepted as a
+# compatible alternative.  Both print the hash as their first field.
 bc_sha256() {
     if command -v sha256sum &>/dev/null; then
         sha256sum "$1" | awk '{print $1}'

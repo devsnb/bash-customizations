@@ -451,12 +451,9 @@ remove_symlinks() {
             continue
         fi
 
-        # Safety check: only remove symlinks that point into our repo.
-        # readlink -f is GNU-only; fall back to readlink without -f on macOS.
+        # Safety check: only remove symlinks that resolve into our repo.
         local target
-        target="$(readlink -f "$link" 2>/dev/null \
-               || readlink "$link" 2>/dev/null \
-               || true)"
+        target="$(readlink -f "$link" 2>/dev/null || true)"
         if [[ -z "$target" ]]; then
             log_warn "Could not resolve symlink target — skipping: $link"
             (( skipped++ )) || true

@@ -10,6 +10,12 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+### Removed
+
+- macOS support, including Darwin release assets, Homebrew integration and BSD
+  command variants. The supported matrix is now explicitly Linux x86_64 and
+  Linux aarch64; 32-bit x86 remains unsupported.
+
 ## [1.1.2] - 2026-09-22
 
 ### Changed

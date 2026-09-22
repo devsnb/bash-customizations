@@ -27,8 +27,8 @@
 #
 # Record: KIND \t SECTION \t NAME \t SIG-OR-EXPANSION \t REQUIRES \t DESCRIPTION
 #
-# POSIX awk only (no gensub/asort/intervals): mawk on Debian and BSD awk on
-# macOS both have to run this.
+# POSIX awk only (no gensub/asort/intervals) so the parser works with the
+# different awk implementations shipped by Linux distributions.
 _bc_help_parse() {
     awk '
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }

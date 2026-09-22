@@ -79,7 +79,6 @@ style    = "bold blue"
 
 [os.symbols]
 Linux   = " "
-Macos   = " "
 Windows = " "
 
 [username]

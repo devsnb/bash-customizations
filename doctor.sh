@@ -5,24 +5,25 @@
 # with actionable instructions to fix each issue.
 #
 # Checks performed:
-#   1.  Bash version (≥ 4.2 required)
-#   2.  PATH contains ~/.local/bin
-#   3.  Tool binaries: starship, fzf, zoxide
-#   4.  ble.sh installation
-#   5.  bash-completion availability
-#   6.  Manifest exists, is readable, and records the installed version
-#   7.  Every managed symlink: exists, is a symlink, points into the repo,
+#   1.  Platform (Linux x86_64 or aarch64)
+#   2.  Bash version (≥ 4.2 required)
+#   3.  PATH contains ~/.local/bin
+#   4.  Tool binaries: starship, fzf, zoxide
+#   5.  ble.sh installation
+#   6.  bash-completion availability
+#   7.  Manifest exists, is readable, and records the installed version
+#   8.  Every managed symlink: exists, is a symlink, points into the repo,
 #       and the repo source file is present (not dangling)
-#   8.  .bashrc structure:
+#   9.  .bashrc structure:
 #         - ble.sh --attach=none appears before any module source lines
 #         - all module source lines are present
 #         - ble-attach appears after prompt.sh source
 #         - no conflicting fzf --bash eval when ble.sh is present
-#   9.  .blerc: exists and contains fzf integration
-#  10.  starship.toml: exists at the expected location
-#  11.  History file: exists and is writable
-#  12.  ble.sh + fzf conflict detection
-#  13.  Optional companion tools (advisory — tree, eza, docker, fzf, curl, …)
+#  10.  .blerc: exists and contains fzf integration
+#  11.  starship.toml: exists at the expected location
+#  12.  History file: exists and is writable
+#  13.  ble.sh + fzf conflict detection
+#  14.  Optional companion tools (advisory — tree, eza, docker, fzf, curl, …)
 #
 # Exit codes:
 #   0  — no failures (warnings may still be present; they are advisory)
@@ -63,8 +64,9 @@ WARNINGS=0           # incremented for every WARN — advisory, never fails the 
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Palette, glyphs, log_* and has() are shared with setup.sh and uninstall.sh.
-if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" ]]; then
-    echo "doctor.sh: cannot find ${REPO_DIR}/lib/log.sh and lib/version.sh" >&2
+if [[ ! -f "${REPO_DIR}/lib/log.sh" || ! -f "${REPO_DIR}/lib/version.sh" \
+   || ! -f "${REPO_DIR}/lib/tools.sh" ]]; then
+    echo "doctor.sh: required files are missing from ${REPO_DIR}/lib" >&2
     echo "           The repository looks incomplete — re-clone it and try again." >&2
     exit 1
 fi
@@ -72,6 +74,8 @@ fi
 source "${REPO_DIR}/lib/log.sh"
 # shellcheck source=lib/version.sh
 source "${REPO_DIR}/lib/version.sh"
+# shellcheck source=lib/tools.sh
+source "${REPO_DIR}/lib/tools.sh"
 
 # doctor's sections group individual checks rather than whole phases of a run,
 # so they get the lighter rule.  log_section reads this at call time.
@@ -128,19 +132,20 @@ parse_args() {
                 echo "Exit codes: 0 = no failures (warnings are advisory), 1 = one or more failures"
                 echo
                 echo "Checks performed:"
-                echo "   1  Bash version ≥ 4.2"
-                echo "   2  ~/.local/bin on PATH"
-                echo "   3  starship / fzf / zoxide binaries present and functional"
-                echo "   4  ble.sh installed"
-                echo "   5  bash-completion available"
-                echo "   6  Install manifest exists, matches this repo and records its version"
-                echo "   7  All managed symlinks valid (not dangling, point into repo)"
-                echo "   8  .bashrc structure: load order, all modules sourced, ble-attach last"
-                echo "   9  .blerc contains fzf integration blocks"
-                echo "  10  starship.toml exists and is well-formed"
-                echo "  11  History file writable"
-                echo "  12  No fzf --bash conflict alongside ble.sh"
-                echo "  13  Optional companion tools present (advisory)"
+                echo "   1  Platform is Linux x86_64 or aarch64"
+                echo "   2  Bash version ≥ 4.2"
+                echo "   3  ~/.local/bin on PATH"
+                echo "   4  starship / fzf / zoxide binaries present and functional"
+                echo "   5  ble.sh installed"
+                echo "   6  bash-completion available"
+                echo "   7  Install manifest exists, matches this repo and records its version"
+                echo "   8  All managed symlinks valid (not dangling, point into repo)"
+                echo "   9  .bashrc structure: load order, all modules sourced, ble-attach last"
+                echo "  10  .blerc contains fzf integration blocks"
+                echo "  11  starship.toml exists and is well-formed"
+                echo "  12  History file writable"
+                echo "  13  No fzf --bash conflict alongside ble.sh"
+                echo "  14  Optional companion tools present (advisory)"
                 echo
                 echo "Examples:"
                 echo "  bash doctor.sh                # full check, show all results"
@@ -157,8 +162,20 @@ parse_args() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Check: Bash version
+# Check: platform and Bash version
 # ══════════════════════════════════════════════════════════════════════════════
+
+check_platform() {
+    log_section "Platform"
+
+    local platform
+    if platform="$(bc_tool_platform)"; then
+        pass "${platform}"
+    else
+        fail "Unsupported platform: $(uname -s)/$(uname -m)" \
+             "Use Linux on x86_64 (x64) or aarch64 (ARM64)."
+    fi
+}
 
 check_bash_version() {
     log_section "Bash version"
@@ -167,7 +184,7 @@ check_bash_version() {
 
     if (( major < 4 || ( major == 4 && minor < 2 ) )); then
         fail "Bash ${BASH_VERSION} — version 4.2+ required" \
-             "macOS: brew install bash && chsh -s \$(brew --prefix)/bin/bash"
+             "Install Bash 4.2 or newer with your Linux package manager."
     else
         pass "Bash ${BASH_VERSION}"
     fi
@@ -248,7 +265,7 @@ check_tools() {
         fzf_ver="$(fzf --version 2>/dev/null | head -1)"
         pass "fzf: ${fzf_ver}"
         # Check for minimum version (0.48.0 required for fzf --bash)
-        # Parse version with POSIX tools (grep -P is GNU-only, absent on macOS).
+        # Parse versions without depending on grep -P.
         local fzf_major fzf_minor
         fzf_major="$(echo "$fzf_ver" | grep -oE '[0-9]+' | awk 'NR==1')" || fzf_major=0
         fzf_minor="$(echo "$fzf_ver" | grep -oE '[0-9]+' | awk 'NR==2')" || fzf_minor=0
@@ -331,22 +348,6 @@ check_bash_completion() {
         fi
     done
 
-    # Also check Homebrew on macOS
-    if [[ -z "$found_at" && "$OSTYPE" == darwin* ]]; then
-        local brew_prefix="${HOMEBREW_PREFIX:-}"
-        if [[ -z "$brew_prefix" ]] && command -v brew &>/dev/null; then
-            brew_prefix="$(brew --prefix)"
-        fi
-        for path in \
-            "${brew_prefix}/etc/profile.d/bash_completion.sh" \
-            "${brew_prefix}/share/bash-completion/bash_completion"; do
-            if [[ -f "$path" ]]; then
-                found_at="$path"
-                break
-            fi
-        done
-    fi
-
     if [[ -n "$found_at" ]]; then
         pass "bash-completion found: ${found_at}"
     else
@@ -354,7 +355,7 @@ check_bash_completion() {
         # root is unavailable, so its absence is a degraded experience, not a
         # broken install — everything else here works without it.
         warn "bash-completion not found (optional — tab-completion will be limited)" \
-             "Install with your package manager: sudo apt install bash-completion  /  brew install bash-completion@2"
+             "Install it with your Linux distribution's package manager."
     fi
 }
 
@@ -398,7 +399,7 @@ check_manifest() {
     fi
 
     # Which release is actually deployed.  This lives inside the manifest check
-    # rather than becoming a 13th check, because that is where the answer is
+    # rather than becoming a 15th check, because that is where the answer is
     # recorded — and because the check list is a documented contract.
     local installed_version
     installed_version="$(grep -m1 '^VERSION=' "$MANIFEST_FILE" 2>/dev/null || true)"
@@ -483,7 +484,7 @@ check_symlinks() {
         target="$(readlink -f "$link" 2>/dev/null || true)"
         if [[ -z "$target" ]]; then
             warn "${link} — could not resolve symlink target (readlink -f unavailable?)" \
-                 "On macOS install coreutils: brew install coreutils"
+                 "Install or repair the coreutils package."
             continue
         fi
         if [[ "$target" != "${REPO_DIR}/"* ]]; then
@@ -783,6 +784,7 @@ main() {
     parse_args "$@"
     print_banner
 
+    check_platform
     check_bash_version
     check_path
     check_tools

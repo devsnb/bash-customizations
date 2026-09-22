@@ -126,9 +126,8 @@ port() {
 
 # ports — list every listening port and the process behind it.
 #
-# Was an alias for `ss -tulpn`, which simply does not exist on macOS.  Sharing
-# `port`'s fallback keeps the two consistent: whatever tool answers `port 8080`
-# is the one that answers `ports`.
+# Sharing `port`'s fallback keeps the two consistent: whatever tool answers
+# `port 8080` is the one that answers `ports`.
 ports() {
     if command -v ss &>/dev/null; then
         ss -tulpn
@@ -189,14 +188,9 @@ fkill() {
     local filter="${1:-}"
 
     local -a ps_cmd
-    # --no-headers is GNU procps (Linux); BSD ps (macOS) uses -h instead.
     # shellcheck disable=SC2054  # the commas belong to ps's -o format, they are
     #                              not array element separators
-    if [[ "$OSTYPE" == darwin* ]]; then
-        ps_cmd=(ps -eo pid,ppid,comm -h)
-    else
-        ps_cmd=(ps -eo pid,ppid,cmd --no-headers)
-    fi
+    ps_cmd=(ps -eo pid,ppid,cmd --no-headers)
 
     local selection pid
     selection=$("${ps_cmd[@]}" \
@@ -229,19 +223,11 @@ myip() {
         echo "(curl not found)"
     fi
     echo -n "Local  : "
-    if [[ "$OSTYPE" == darwin* ]]; then
-        # macOS: hostname -I is not supported; use ipconfig or ifconfig
-        ipconfig getifaddr en0 2>/dev/null \
-            || ipconfig getifaddr en1 2>/dev/null \
-            || ifconfig 2>/dev/null | awk '/inet /{print $2}' | grep -v '^127' | head -1 \
-            || echo "(unavailable)"
-    else
-        # A pipeline's exit status is the LAST command's, so `cmd | awk || echo`
-        # never reached the fallback — capture first, then decide.
-        local local_ip
-        local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-        echo "${local_ip:-(unavailable)}"
-    fi
+    # A pipeline's exit status is the LAST command's, so `cmd | awk || echo`
+    # never reached the fallback — capture first, then decide.
+    local local_ip
+    local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    echo "${local_ip:-(unavailable)}"
 }
 
 # ── Development ───────────────────────────────────────────────────────────────

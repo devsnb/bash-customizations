@@ -40,13 +40,13 @@ if command -v eza &>/dev/null; then
     alias lt='eza --tree --level=2 --icons=auto'                         #: [eza] tree view, two levels deep
     alias llt='eza --tree --level=3 -lah --icons=auto --git'             #: [eza] tree view, three levels deep, long form
 else
-    # Colorize ls output.  GNU ls uses --color; BSD ls uses -G.
+    # Colorize ls output when the installed Linux implementation supports it.
     if ls --color=auto --group-directories-first &>/dev/null; then
         alias ls='ls --color=auto --group-directories-first'
     elif ls --color=auto &>/dev/null; then
         alias ls='ls --color=auto'
     else
-        alias ls='ls -G'    # BSD/macOS
+        alias ls='ls'
     fi
     alias ll='ls -lahF'
     alias la='ls -AF'
@@ -72,20 +72,14 @@ alias du-dirs='du -d1 -h'    #: size of each subdirectory below here
 alias du-files='du -sh *'    #: size of each entry in this directory
 
 # ── Processes ─────────────────────────────────────────────────────────────────
-# `f` (ASCII-art forest) is GNU procps only — BSD ps on macOS rejects it and
-# prints usage instead of a process list.  Only the GNU branch is annotated;
-# both define the same name.
-if [[ "$OSTYPE" == darwin* ]]; then
-    alias psa='ps aux'
-else
-    alias psa='ps auxf'                        #: every process, as a tree
-fi
+# `f` asks Linux procps to render the parent/child relationships as a tree.
+alias psa='ps auxf'                            #: every process, as a tree
 alias psg='ps aux | grep -v grep | grep -i'    #: search the process list, e.g. psg nginx
 
 # ── Network ───────────────────────────────────────────────────────────────────
 alias ping='ping -c 5'    #: ping, stopping after five packets
-# `ports` is a function in functions.sh — ss does not exist on macOS, so it
-# needs the same ss/lsof fallback that `port` already has.
+# `ports` is a function in functions.sh so it can fall back to lsof when a
+# minimal Linux environment does not provide ss.
 
 # ── Editor ────────────────────────────────────────────────────────────────────
 # No `vi` alias here on purpose: it shadows /usr/bin/vi, so `vi file` would open

@@ -98,6 +98,7 @@ the live executable is replaced.
 
 | Requirement | Why | How to check |
 |---|---|---|
+| Linux x86_64 or aarch64 | supported operating system and CPU matrix | `uname -sm` |
 | Bash ≥ 4.2 | associative arrays, `[[ ]]` features | `bash --version` |
 | `curl` or `wget` | downloading tools | `command -v curl` |
 | `sha256sum` or `shasum` | verifying downloaded and installed tool bytes | `command -v sha256sum shasum` |
@@ -109,6 +110,10 @@ the live executable is replaced.
 Those download and archive requirements apply to a full tool installation.
 `bash setup.sh --skip-tools` remains available for dotfile deployment and repair
 even when `tools.lock`, curl/wget, or the archive utilities are unavailable.
+
+The supported platforms are deliberately limited to 64-bit Linux: x86_64
+(x64/AMD64) and aarch64 (ARM64). macOS and 32-bit x86 (i386/i686) are not
+supported; setup rejects them before making changes.
 
 **Keep the clone where it is.** Every deployed file is a symlink back into this
 repository, so moving or deleting it after install breaks your shell config. If you
@@ -275,23 +280,24 @@ Warnings — a missing non-interactive guard, an optional package, a shell that
 predates the install — are advisory and never change the exit code, so
 `doctor.sh` is safe to gate a script on.
 
-`doctor.sh` checks **12 things** and prints a `→ Fix:` instruction for every failure:
+`doctor.sh` checks **14 things** and prints a `→ Fix:` instruction for every failure:
 
 | # | Check |
 |---|---|
-| 1 | Bash version ≥ 4.2 |
-| 2 | `~/.local/bin` on PATH |
-| 3 | `starship`, `fzf`, `zoxide` binaries exist and are functional |
-| 4 | ble.sh installed + `.blerc` has fzf integration |
-| 5 | `bash-completion` available |
-| 6 | Manifest exists, is readable, and `REPO=` matches the current repo location |
-| 7 | Every symlink: exists, is a symlink, not dangling, points into repo |
-| 8 | `.bashrc` structure: ble.sh Part 1 first, all module sources present, correct load order, ble-attach last |
-| 9 | `.blerc` contains fzf integration blocks |
-| 10 | `starship.toml` exists and is well-formed |
-| 11 | History file is writable |
-| 12 | No `fzf --bash` conflict alongside ble.sh |
-| 13 | Optional companion tools used by aliases/functions are available *(advisory)* |
+| 1 | Platform is Linux x86_64 or aarch64 |
+| 2 | Bash version ≥ 4.2 |
+| 3 | `~/.local/bin` on PATH |
+| 4 | `starship`, `fzf`, `zoxide` binaries exist and are functional |
+| 5 | ble.sh installed + `.blerc` has fzf integration |
+| 6 | `bash-completion` available |
+| 7 | Manifest exists, is readable, and `REPO=` matches the current repo location |
+| 8 | Every symlink: exists, is a symlink, not dangling, points into repo |
+| 9 | `.bashrc` structure: ble.sh Part 1 first, all module sources present, correct load order, ble-attach last |
+| 10 | `.blerc` contains fzf integration blocks |
+| 11 | `starship.toml` exists and is well-formed |
+| 12 | History file is writable |
+| 13 | No `fzf --bash` conflict alongside ble.sh |
+| 14 | Optional companion tools used by aliases/functions are available *(advisory)* |
 
 ---
 
@@ -447,11 +453,11 @@ ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 - `HISTCONTROL=ignoredups:erasedups` — no duplicates, ever
 - `HISTTIMEFORMAT` — timestamps on every entry
 - `shopt -s histappend cmdhist histreedit`
-- `PROMPT_COMMAND` — `history -a; history -c; history -r` after every command
+- `PROMPT_COMMAND` — `history -a; history -n` after every command
   (immediate save + sync across all open terminals)
 
 ### `completion.sh`
-- Auto-detects system bash-completion on Linux and Homebrew macOS
+- Auto-detects system and manually installed bash-completion on Linux
 - Readline options: `completion-ignore-case` (case-insensitive), `completion-map-case` (hyphens ↔ underscores), `show-all-if-ambiguous`, `colored-stats`, `colored-completion-prefix`, `visible-stats`, `mark-directories`, `mark-symlinked-directories`
 
 ### `init.sh`

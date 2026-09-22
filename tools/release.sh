@@ -45,8 +45,7 @@ die() {
 usage() { sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # version_gt A B — true when A is strictly newer than B.
-# Field-by-field integer compare: `sort -V` is GNU-only and this repo runs on
-# macOS too.
+# Field-by-field integer compare avoids depending on version-sort extensions.
 version_gt() {
     local -a a b
     local i

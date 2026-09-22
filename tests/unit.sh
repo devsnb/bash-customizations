@@ -274,8 +274,8 @@ fi
 
 out=$(bash "${REPO_DIR}/doctor.sh" --help 2>&1)
 assert_contains "$out" "warnings are advisory" "doctor --help documents its exit codes"
-assert_contains "$out" "  13  " "doctor --help lists all 13 checks"
-assert_not_contains "$out" "  14  " "doctor --help has no stale 14th check"
+assert_contains "$out" "  14  " "doctor --help lists all 14 checks"
+assert_not_contains "$out" "  15  " "doctor --help has no stale 15th check"
 
 out=$(bash "${REPO_DIR}/uninstall.sh" --help 2>&1)
 for flag in "--yes" "--restore-only" "--prune-backups" "--delete-backup" "--list-backups"; do
@@ -508,8 +508,8 @@ assert_exit 1 "lock validation rejects a missing platform hash" \
 
 assert_eq "4" "$(grep -cE '^[A-Z]+_VERSION=' "${REPO_DIR}/tools.lock")" \
     "the lock has one version for every managed tool"
-assert_eq "13" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${REPO_DIR}/tools.lock")" \
-    "the lock has all twelve binary hashes plus the architecture-independent ble.sh hash"
+assert_eq "7" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${REPO_DIR}/tools.lock")" \
+    "the lock has six Linux binary hashes plus the architecture-independent ble.sh hash"
 
 for tool in "${BC_MANAGED_TOOLS[@]}"; do
     version="$(bc_tool_version "$tool")"
@@ -530,16 +530,38 @@ mkdir -p "${WORK}/fake-uname"
 cat > "${WORK}/fake-uname/uname" <<'UNAME'
 #!/usr/bin/env bash
 case "$1" in
-    -s) echo Darwin ;;
+    -s) echo Linux ;;
     -m) echo arm64 ;;
     *) exit 1 ;;
 esac
 UNAME
 chmod +x "${WORK}/fake-uname/uname"
-assert_eq "darwin_aarch64" "$(PATH="${WORK}/fake-uname:${PATH}" bc_tool_platform)" \
-    "Darwin arm64 is normalised to the lock's platform name"
-assert_eq "aarch64-apple-darwin" "$(_bc_tool_triple zoxide darwin_aarch64)" \
-    "the zoxide asset triple matches Darwin arm64"
+assert_eq "linux_aarch64" "$(PATH="${WORK}/fake-uname:${PATH}" bc_tool_platform)" \
+    "Linux arm64 is normalised to the lock's platform name"
+assert_eq "aarch64-unknown-linux-musl" "$(_bc_tool_triple zoxide linux_aarch64)" \
+    "the zoxide asset triple matches Linux ARM64"
+
+mkdir -p "${WORK}/fake-darwin" "${WORK}/fake-i686"
+printf '%s\n' '#!/usr/bin/env bash' \
+    '[[ "$1" == -s ]] && echo Darwin || echo arm64' \
+    > "${WORK}/fake-darwin/uname"
+printf '%s\n' '#!/usr/bin/env bash' \
+    '[[ "$1" == -s ]] && echo Linux || echo i686' \
+    > "${WORK}/fake-i686/uname"
+chmod +x "${WORK}/fake-darwin/uname" "${WORK}/fake-i686/uname"
+assert_exit 1 "Darwin is not a supported platform" \
+    env PATH="${WORK}/fake-darwin:${PATH}" bash -c \
+        "source '${REPO_DIR}/lib/tools.sh'; bc_tool_platform"
+assert_exit 1 "32-bit x86 is not a supported platform" \
+    env PATH="${WORK}/fake-i686:${PATH}" bash -c \
+        "source '${REPO_DIR}/lib/tools.sh'; bc_tool_platform"
+
+mkdir -p "${WORK}/unsupported-home"
+assert_exit 1 "setup rejects Darwin even when tool installation is skipped" \
+    env HOME="${WORK}/unsupported-home" PATH="${WORK}/fake-darwin:${PATH}" \
+        bash "${REPO_DIR}/setup.sh" --skip-tools
+assert_exit 1 "unsupported setup exits before creating .bashrc" \
+    test -e "${WORK}/unsupported-home/.bashrc"
 
 # setup.sh is sourceable for focused tests but runs main only when executed.
 # Stub the downloader so these assertions need no network.
@@ -615,7 +637,7 @@ assert_file_contains "${LOCK_REPO}/tools.lock" "FZF_VERSION=99.0.0" \
     "a named update advances the selected tool"
 assert_eq "4" "$(grep -cE '^[A-Z]+_VERSION=' "${LOCK_REPO}/tools.lock")" \
     "a named lock refresh does not drop unselected tool versions"
-assert_eq "13" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${LOCK_REPO}/tools.lock")" \
+assert_eq "7" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${LOCK_REPO}/tools.lock")" \
     "a named lock refresh does not drop unselected platform hashes"
 
 printf '%s\n' '#!/usr/bin/env bash' \
@@ -759,7 +781,7 @@ assert_eq "$(printf '%s\n' "$documented_aliases" | wc -l)" "$annotation_count" \
 # truncate it silently.  Forbid that outright rather than handle it.
 # Everything left of the sigil on an annotated line is the definition; a '#'
 # in there means the expansion contains one.  Unannotated lines are skipped so
-# a plain trailing "# BSD/macOS" note stays legal.
+# a plain trailing note stays legal.
 stray_hash=$(grep -E '^[[:space:]]*alias[[:space:]].* #: ' "${REPO_DIR}/bash/aliases.sh" \
     | sed 's/ #: .*//' | grep '#' || true)
 assert_eq "" "$stray_hash" "no alias expansion contains a literal #"

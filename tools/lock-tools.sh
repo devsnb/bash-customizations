@@ -12,13 +12,13 @@
 #   bash tools/lock-tools.sh --check         # exit 1 if a newer release exists
 #   bash tools/lock-tools.sh --latest fzf …  # move only the named tools
 #
-# Every hash is computed here, from the bytes actually downloaded, for all four
+# Every hash is computed here, from the bytes actually downloaded, for both
 # platforms in BC_TOOL_PLATFORMS — not copied from a vendor's checksum file.
 # A vendor checksum fetched at install time proves the download survived the
 # CDN; a hash committed to git proves it is the same build that was reviewed.
 #
-# This needs the network and takes a minute: 4 tools x 4 platforms is 13
-# downloads (ble.sh is one arch-independent tarball).
+# This needs the network and downloads seven assets: three compiled tools for
+# two Linux architectures plus one architecture-independent ble.sh tarball.
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 

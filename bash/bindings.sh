@@ -28,7 +28,6 @@ bind '"\C-n": history-search-forward'  2>/dev/null
 # ALT-← / ALT-→  move one word at a time.
 # Sequences \e[1;3C / \e[1;3D work in xterm-compatible terminals
 # (GNOME Terminal, Windows Terminal, kitty, Alacritty).
-# macOS Terminal.app sends \033f / \033b instead — adjust if ALT+arrow is broken.
 bind '"\e[1;3C": forward-word'  2>/dev/null   # ALT-→
 bind '"\e[1;3D": backward-word' 2>/dev/null   # ALT-←
 

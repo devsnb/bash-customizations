@@ -3,7 +3,7 @@
 #
 # bash-completion v2 setup.
 # Most distros already source this via /etc/profile.d/; this file handles
-# the cases where they don't (e.g. macOS with Homebrew, minimal containers).
+# minimal containers and manual Linux installations where they do not.
 #
 # bash-completion latest: v2.17.0  (https://github.com/scop/bash-completion)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -14,10 +14,10 @@ if [[ -n "${BASH_COMPLETION_VERSINFO:-}" ]]; then
     return 0
 fi
 
-# ── Linux / generic Unix ──────────────────────────────────────────────────────
+# ── Linux ─────────────────────────────────────────────────────────────────────
 _bc_linux=(
     /usr/share/bash-completion/bash_completion   # Debian / Ubuntu / Fedora / Arch
-    /usr/local/share/bash-completion/bash_completion  # manual / BSD install
+    /usr/local/share/bash-completion/bash_completion  # manual install
     /etc/bash_completion                          # older distros
 )
 
@@ -29,33 +29,6 @@ for _bc_file in "${_bc_linux[@]}"; do
     fi
 done
 unset _bc_file _bc_linux
-
-# ── macOS (Homebrew) ──────────────────────────────────────────────────────────
-# Homebrew stores the prefix in $HOMEBREW_PREFIX (set since Homebrew 3.x).
-# Fallback to the default Intel and Apple-Silicon locations.
-if [[ "$OSTYPE" == darwin* ]] && [[ -z "${BASH_COMPLETION_VERSINFO:-}" ]]; then
-    _bc_brew_prefix="${HOMEBREW_PREFIX:-}"
-
-    if [[ -z "$_bc_brew_prefix" ]] && command -v brew &>/dev/null; then
-        _bc_brew_prefix="$(brew --prefix)"
-    fi
-
-    # Only probe Homebrew paths when we actually found a prefix.
-    # An empty prefix would form paths like /etc/... which are Linux system
-    # paths and must never be sourced on macOS.
-    if [[ -n "$_bc_brew_prefix" ]]; then
-        for _bc_brew_script in \
-            "${_bc_brew_prefix}/etc/profile.d/bash_completion.sh" \
-            "${_bc_brew_prefix}/share/bash-completion/bash_completion"; do
-            if [[ -f "$_bc_brew_script" ]]; then
-                # shellcheck source=/dev/null
-                source "$_bc_brew_script"
-                break
-            fi
-        done
-    fi
-    unset _bc_brew_prefix _bc_brew_script
-fi
 
 # ── User-level completions ────────────────────────────────────────────────────
 # Drop files in ~/.local/share/bash-completion/completions/ and they are

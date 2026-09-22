@@ -552,11 +552,22 @@ parse_args() {
 check_prerequisites() {
     log_section "Checking prerequisites"
 
+    # The configuration and verified binary matrix deliberately support Linux
+    # on 64-bit x86 and ARM only. Reject other systems even for --skip-tools so
+    # a partial dotfile deployment cannot be mistaken for platform support.
+    local platform
+    if ! platform="$(bc_tool_platform)"; then
+        log_error "Unsupported platform: $(uname -s)/$(uname -m)."
+        log_error "Only Linux x86_64 (x64) and aarch64 (ARM64) are supported."
+        exit 1
+    fi
+    log_ok "Platform ${platform}"
+
     # Bash version ≥ 4.2
     local bash_major="${BASH_VERSINFO[0]}" bash_minor="${BASH_VERSINFO[1]}"
     if (( bash_major < 4 || ( bash_major == 4 && bash_minor < 2 ) )); then
         log_error "Bash 4.2+ required (found ${BASH_VERSION})."
-        log_error "On macOS, install a newer Bash: brew install bash"
+        log_error "Install Bash 4.2 or newer with your Linux package manager."
         exit 1
     fi
     log_ok "Bash ${BASH_VERSION}"
@@ -784,7 +795,7 @@ install_bash_completion() {
     # bash-completion is the one dependency that lives in system paths, so it is
     # also the one that needs root.  It is a nice-to-have, not a prerequisite:
     # a failure here must never take the rest of the install down with it.
-    if ! has brew && ! root_available; then
+    if ! root_available; then
         log_warn "Skipping bash-completion — needs root and no sudo is available."
         log_warn "Install it yourself later: <your package manager> install bash-completion"
         return 0
@@ -796,7 +807,6 @@ install_bash_completion() {
         if has apt-get;  then  log_dry "apt-get update && apt-get install -y bash-completion"
         elif has dnf;    then  log_dry "dnf install -y bash-completion"
         elif has pacman; then  log_dry "pacman -S --noconfirm bash-completion"
-        elif has brew;   then  log_dry "brew install bash-completion@2"
         else                   log_dry "<package manager> install bash-completion"
         fi
         return 0
@@ -814,8 +824,6 @@ install_bash_completion() {
         _as_root pacman -S --noconfirm bash-completion && installed=true
     elif has zypper; then
         _as_root zypper install -y bash-completion && installed=true
-    elif has brew; then
-        brew install bash-completion@2 && installed=true
     else
         log_warn "No supported package manager found."
         log_warn "Please install bash-completion manually: https://github.com/scop/bash-completion"
@@ -1467,7 +1475,6 @@ ensure_locale() {
         log_warn "locale-gen not found. Generate the locale manually:"
         log_warn "  Fedora/RHEL : sudo dnf install -y glibc-langpack-en"
         log_warn "  Arch        : uncomment en_US.UTF-8 in /etc/locale.gen && sudo locale-gen"
-        log_warn "  macOS       : locale is managed by the OS; no action needed"
     fi
 }
 
