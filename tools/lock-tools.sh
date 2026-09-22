@@ -17,8 +17,8 @@
 # A vendor checksum fetched at install time proves the download survived the
 # CDN; a hash committed to git proves it is the same build that was reviewed.
 #
-# This needs the network and downloads seven assets: three compiled tools for
-# two Linux architectures plus one architecture-independent ble.sh tarball.
+# This needs the network and downloads nine assets: four compiled tools for two
+# Linux architectures plus one architecture-independent ble.sh tarball.
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
@@ -150,6 +150,7 @@ latest_version() {
     local tool="$1" repo tag body
     case "$tool" in
         starship) repo=starship/starship   ;;
+        fd)       repo=sharkdp/fd          ;;
         fzf)      repo=junegunn/fzf        ;;
         zoxide)   repo=ajeetdsouza/zoxide  ;;
         blesh)

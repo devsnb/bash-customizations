@@ -14,6 +14,9 @@
 #   zoxide v0.9.9   (https://github.com/ajeetdsouza/zoxide)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Standalone-module fallback; exports.sh normally provides the cached version.
+declare -F _bc_has &>/dev/null || _bc_has() { command -v "$1" &>/dev/null; }
+
 # ── fzf ───────────────────────────────────────────────────────────────────────
 # `fzf --bash` (available since fzf v0.48.0) initialises all three bindings:
 #   CTRL-T  file picker
@@ -22,7 +25,7 @@
 #
 # When ble.sh is active we use ble.sh's built-in fzf integration modules
 # instead, which avoids keymap conflicts.  See ~/.blerc for that config.
-if command -v fzf &>/dev/null; then
+if _bc_has fzf; then
     if [[ -n "${BLE_VERSION:-}" ]]; then
         # ble.sh is running — delegate fzf key-bindings to ~/.blerc
         # (ble-import calls are made there; nothing to do here)
@@ -40,7 +43,7 @@ fi
 # Flags:
 #   (none)       → adds `z` and `zi`, leaves the real `cd` untouched
 #   --cmd cd     → replaces `cd` with zoxide entirely (uncomment to enable)
-if command -v zoxide &>/dev/null; then
+if _bc_has zoxide; then
     eval "$(zoxide init bash)"
     # eval "$(zoxide init bash --cmd cd)"   # ← uncomment to replace `cd`
 fi

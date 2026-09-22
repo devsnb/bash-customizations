@@ -8,19 +8,21 @@
 # ── Size ──────────────────────────────────────────────────────────────────────
 # HISTSIZE     : number of entries kept in memory (current session)
 # HISTFILESIZE : number of entries written to the history file (~/.bash_history)
-HISTSIZE=100000
-HISTFILESIZE=200000
+HISTSIZE=50000
+HISTFILESIZE=100000
 
 # ── Deduplication & filtering ─────────────────────────────────────────────────
-# ignoredups  : don't record a command that is identical to the previous entry
-# erasedups   : remove ALL previous duplicates of a command before recording it
-#               (keeps the most-recent occurrence at the end of the file)
-HISTCONTROL=ignoredups:erasedups
+# ignoreboth combines two inexpensive rules:
+#   ignoredups  : don't record a command identical to the previous entry
+#   ignorespace : don't record commands beginning with a space
+# Avoid `erasedups`: removing every older match scans the large in-memory
+# history whenever a command is recorded, which becomes noticeable over time.
+HISTCONTROL=ignoreboth
 
 # Commands that are too short or too common to be worth saving.
 # Separate patterns with colons.  Globs are allowed.
-# ' *' (space-star) — any command prefixed with a leading space is silently
-# omitted from history. Useful for sensitive commands (passwords, tokens, etc.)
+# ' *' (space-star) mirrors `ignorespace` above and documents the intended
+# filtering here too. Useful for sensitive commands (passwords, tokens, etc.)
 # e.g.:  <space>AWS_SECRET=abc aws s3 ...   ← never recorded
 HISTIGNORE="ls:ls *:ll:la:l:cd:cd -:pwd:exit:clear:history:bg:fg:jobs: *"
 

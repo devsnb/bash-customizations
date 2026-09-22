@@ -6,7 +6,7 @@
 # What it does (in order):
 #   1. Checks prerequisites (Bash ≥ 4.2; download tools only for a full install)
 #   1.5. Ensures en_US.UTF-8 locale is installed (required by ble.sh)
-#   2. Installs: starship · ble.sh · bash-completion · fzf · zoxide
+#   2. Installs: starship · ble.sh · bash-completion · fd · fzf · zoxide
 #   3. Deploys dotfiles (.bashrc · .bash/ · .blerc · starship.toml)
 #      with automatic backup of any existing files/directories
 #   4. Verifies that each tool is on PATH and prints a summary
@@ -42,7 +42,10 @@ BACKUP_DIR="${HOME}/.bash_backup/$(date +%Y%m%d_%H%M%S)"
 BASH_DIR="${HOME}/.bash"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 XDG_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
 LOCAL_BIN="${HOME}/.local/bin"
+CAPABILITY_CACHE_DIR="${XDG_CACHE_HOME}/bash-customizations"
+CAPABILITY_CACHE_FILE="${CAPABILITY_CACHE_DIR}/capabilities.sh"
 
 # Manifest — records every symlink we create so uninstall.sh knows exactly
 # what to clean up.  One file, human-readable key=value format.
@@ -325,9 +328,9 @@ load_tool_ownership() {
     [[ -r "$MANIFEST_FILE" ]] || return 0
     while IFS= read -r value; do
         value="${value#TOOL=}"
-        [[ "$value" =~ ^(starship|fzf|zoxide|blesh):[^:]+:[0-9a-f]{64}$ ]] || continue
+        [[ "$value" =~ ^(starship|fd|fzf|zoxide|blesh):[^:]+:[0-9a-f]{64}$ ]] || continue
         case "${value%%:*}" in
-            starship|fzf|zoxide|blesh) PREVIOUS_MANAGED_TOOLS+=("$value") ;;
+            starship|fd|fzf|zoxide|blesh) PREVIOUS_MANAGED_TOOLS+=("$value") ;;
         esac
     done < <(grep '^TOOL=' "$MANIFEST_FILE" 2>/dev/null || true)
 
@@ -463,19 +466,25 @@ binary_install_decision() {
 # corrupt archive or failed validation leaves the previous executable intact.
 install_verified_binary() {
     local name="$1" version="$2" platform="$3"
-    local blob stage staged found previous_link=""
+    local blob stage staged found previous_link="" archive_member="$name"
     mkdir -p "$LOCAL_BIN"
     blob="$(mktemp)"
     stage="$(mktemp -d "${LOCAL_BIN}/.${name}.install.XXXXXX")"
 
+    # fd's release archives wrap the executable in a versioned directory;
+    # the other managed binary archives put it at their root.
+    if [[ "$name" == fd ]]; then
+        archive_member="fd-v${version}-$(_bc_tool_triple fd "$platform")/fd"
+    fi
+
     if ! fetch_verified "$name" "$platform" "$version" "$blob" \
-        || ! tar -xzf "$blob" -C "$stage" "$name"; then
+        || ! tar -xzf "$blob" -C "$stage" "$archive_member"; then
         log_error "${name}: could not download or unpack the verified archive"
         rm -rf "$blob" "$stage"
         return 1
     fi
 
-    staged="${stage}/${name}"
+    staged="${stage}/${archive_member}"
     chmod +x "$staged"
     found="$("$staged" --version 2>/dev/null | head -1 \
         | grep -oE 'v?[0-9]+([.][0-9]+)+' | head -1 | sed 's/^v//' || true)"
@@ -613,7 +622,7 @@ check_prerequisites() {
     fi
     log_ok "tar $(tar --version 2>/dev/null | head -1)"
     if ! has gzip; then
-        log_error "gzip is required to unpack starship, fzf and zoxide."
+        log_error "gzip is required to unpack starship, fd, fzf and zoxide."
         exit 1
     fi
     if ! has xz; then
@@ -839,6 +848,33 @@ install_bash_completion() {
     return 0
 }
 
+# ── fd ────────────────────────────────────────────────────────────────────────
+install_fd() {
+    local version; version="$(tool_version fd)" || {
+        log_error "fd: no version available (tools.lock unreadable?)"; return 1; }
+    log_section "fd ${version}"
+
+    local decision=0
+    binary_install_decision fd "$version" || decision=$?
+    [[ "$decision" -eq 1 ]] && return 0
+    [[ "$decision" -eq 2 ]] && return 1
+
+    local platform; platform="$(bc_tool_platform)" || {
+        log_error "fd: unsupported platform $(uname -s)/$(uname -m)"
+        log_error "  Install it manually: https://github.com/sharkdp/fd/releases"
+        return 1
+    }
+
+    if $DRY_RUN; then
+        log_dry "download $(bc_tool_url fd "$platform" "$version")"
+        log_dry "verify sha256, then extract 'fd' into ${LOCAL_BIN}"
+        return 0
+    fi
+
+    log_info "Installing fd ${version} to ${LOCAL_BIN}…"
+    install_verified_binary fd "$version" "$platform"
+}
+
 # ── fzf ───────────────────────────────────────────────────────────────────────
 install_fzf() {
     local version; version="$(tool_version fzf)" || {
@@ -868,6 +904,38 @@ install_fzf() {
     # hash, and needs neither git nor a compiler.
     log_info "Installing fzf ${version} to ${LOCAL_BIN}…"
     install_verified_binary fzf "$version" "$platform"
+}
+
+# write_capability_cache — resolve startup-time feature checks once per setup.
+#
+# Negative command lookups are surprisingly expensive on WSL when PATH contains
+# many /mnt/c entries.  The runtime modules source these booleans instead of
+# searching PATH whenever a terminal opens.  Re-run setup.sh --skip-tools after
+# manually installing or removing an optional companion such as eza or docker.
+write_capability_cache() {
+    if $DRY_RUN; then
+        log_dry "refresh runtime capability cache: ${CAPABILITY_CACHE_FILE}"
+        return 0
+    fi
+
+    mkdir -p "$CAPABILITY_CACHE_DIR"
+    local tmp tool variable available
+    tmp="$(mktemp "${CAPABILITY_CACHE_DIR}/.capabilities.XXXXXX")"
+    {
+        echo '# Generated by bash-customizations setup.sh; do not edit.'
+        echo 'BC_CAP_CACHE_VERSION=1'
+        for tool in fd rg eza docker fzf zoxide starship; do
+            variable="BC_CAP_${tool^^}"
+            available=0
+            if [[ -x "${LOCAL_BIN}/${tool}" ]] || command -v "$tool" &>/dev/null; then
+                available=1
+            fi
+            printf '%s=%s\n' "$variable" "$available"
+        done
+    } > "$tmp"
+    chmod 644 "$tmp"
+    mv "$tmp" "$CAPABILITY_CACHE_FILE"
+    log_ok "Runtime capability cache refreshed: ${CAPABILITY_CACHE_FILE}"
 }
 
 # ── zoxide ────────────────────────────────────────────────────────────────────
@@ -1298,6 +1366,7 @@ verify() {
 
     if ! $SKIP_TOOLS; then
         _check "starship"       starship
+        _check "fd"             fd
         _check "fzf"            fzf
         _check "zoxide"         zoxide
 
@@ -1495,11 +1564,15 @@ main() {
         install_blesh
         write_tool_ownership_checkpoint
         install_bash_completion
+        install_fd
+        write_tool_ownership_checkpoint
         install_fzf
         write_tool_ownership_checkpoint
         install_zoxide
         write_tool_ownership_checkpoint
     fi
+
+    write_capability_cache
 
     deploy_dotfiles
 

@@ -62,6 +62,53 @@ out=$(
 )
 assert_eq "${WORK}/made-by-mkcd" "$out" "mkcd creates the directory and enters it"
 
+# fcd prefers managed fd, and its portable fallback must prune dependency and
+# repository metadata trees rather than merely hiding their output.
+FCD_BIN="${WORK}/fcd-bin"
+FCD_ROOT="${WORK}/fcd-root"
+mkdir -p "$FCD_BIN" "$FCD_ROOT/target" "$FCD_ROOT/node_modules/deep" "$FCD_ROOT/.git/objects"
+cat > "$FCD_BIN/fd" <<'FD'
+#!/usr/bin/env bash
+printf '%s\n' "$FCD_TARGET"
+FD
+cat > "$FCD_BIN/fzf" <<'FZF'
+#!/usr/bin/env bash
+selection=''
+while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$FCD_LOG"
+    [[ -n "$selection" ]] || selection="$line"
+done
+printf '%s\n' "$selection"
+FZF
+chmod +x "$FCD_BIN/fd" "$FCD_BIN/fzf"
+
+out=$(
+    export FCD_TARGET="$FCD_ROOT/target" FCD_LOG="${WORK}/fcd-fd.log"
+    PATH="${FCD_BIN}:/usr/bin:/bin"
+    source "${REPO_DIR}/bash/functions.sh"
+    fcd "$FCD_ROOT" && pwd
+)
+assert_eq "$FCD_ROOT/target" "$out" "fcd uses fd output when fd is available"
+
+rm "$FCD_BIN/fd"
+out=$(
+    export FCD_LOG="${WORK}/fcd-find.log"
+    PATH="${FCD_BIN}:/usr/bin:/bin"
+    source "${REPO_DIR}/bash/functions.sh"
+    fcd "$FCD_ROOT" && pwd
+)
+assert_eq "$FCD_ROOT" "$out" "fcd retains a find fallback when fd is unavailable"
+fallback_candidates="$(cat "${WORK}/fcd-find.log")"
+assert_contains "$fallback_candidates" "$FCD_ROOT/target" "fcd fallback finds ordinary directories"
+assert_not_contains "$fallback_candidates" "node_modules" "fcd fallback prunes node_modules"
+assert_not_contains "$fallback_candidates" "/.git" "fcd fallback prunes .git"
+
+# History stays bounded and avoids erasedups' full-history scan per command.
+history_settings=$(bash --noprofile --norc -c \
+    "source '${REPO_DIR}/bash/history.sh'; printf '%s %s %s' \"\$HISTSIZE\" \"\$HISTFILESIZE\" \"\$HISTCONTROL\"")
+assert_eq "50000 100000 ignoreboth" "$history_settings" \
+    "history uses bounded sizes and inexpensive duplicate filtering"
+
 # ══════════════════════════════════════════════════════════════════════════════
 suite "bash/functions.sh — extract"
 # ══════════════════════════════════════════════════════════════════════════════
@@ -205,6 +252,29 @@ out=$(
 )
 assert_contains "$out" "alias ll=" "aliases.sh defines ll on this host"
 
+CAP_HOME="${WORK}/cap-home"
+CAP_BIN="${WORK}/cap-bin"
+mkdir -p "$CAP_HOME" "$CAP_BIN"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$CAP_BIN/eza"
+chmod +x "$CAP_BIN/eza"
+assert_exit 0 "setup can generate the runtime capability cache" \
+    env HOME="$CAP_HOME" XDG_CACHE_HOME="$CAP_HOME/.cache" \
+        PATH="$CAP_BIN:/usr/bin:/bin" bash --noprofile --norc -c \
+        "source '${REPO_DIR}/setup.sh'; trap - ERR; write_capability_cache"
+CAP_FILE="$CAP_HOME/.cache/bash-customizations/capabilities.sh"
+assert_file_contains "$CAP_FILE" "BC_CAP_EZA=1" \
+    "capability generation records an available optional tool"
+assert_file_contains "$CAP_FILE" "BC_CAP_FD=0" \
+    "capability generation records a missing tool"
+
+# A cached negative answer must win over a live PATH search; otherwise absent
+# WSL tools would still traverse every imported Windows directory at startup.
+sed -i 's/^BC_CAP_EZA=1$/BC_CAP_EZA=0/' "$CAP_FILE"
+cached_answer=$(env HOME="$CAP_HOME" XDG_CACHE_HOME="$CAP_HOME/.cache" \
+    PATH="$CAP_BIN:/usr/bin:/bin" bash --noprofile --norc -c \
+    "source '${REPO_DIR}/bash/exports.sh'; if _bc_has eza; then echo yes; else echo no; fi")
+assert_eq "no" "$cached_answer" "runtime tool checks honour the setup cache"
+
 # ══════════════════════════════════════════════════════════════════════════════
 suite "script argument handling"
 # ══════════════════════════════════════════════════════════════════════════════
@@ -317,7 +387,10 @@ assert_exit 0 "--skip-tools works without tools.lock" \
     env HOME="${WORK}/skip-home" \
         XDG_CONFIG_HOME="${WORK}/skip-home/.config" \
         XDG_DATA_HOME="${WORK}/skip-home/.local/share" \
+        XDG_CACHE_HOME="${WORK}/skip-home/.cache" \
         bash "${SKIP_REPO}/setup.sh" --skip-tools
+assert_exists "${WORK}/skip-home/.cache/bash-customizations/capabilities.sh" \
+    "--skip-tools still refreshes the runtime capability cache"
 
 # A system fzf elsewhere on PATH must not suppress the pinned ~/.local/bin copy;
 # a conflicting file at the managed path, however, needs explicit ownership.
@@ -377,6 +450,24 @@ assert_exit 0 "a validated staged binary is activated" \
     ' _ "$REPO_DIR"
 assert_eq "9.9.9" "$("${ATOMIC_HOME}/.local/bin/fzf" --version)" \
     "atomic activation installs the expected version"
+
+# fd is the one managed binary whose upstream archive nests the executable in
+# a versioned target-triple directory.
+FD_ATOMIC_HOME="${WORK}/fd-atomic-home"
+FD_ARCHIVE_ROOT="${WORK}/fd-archive/fd-v9.9.9-x86_64-unknown-linux-musl"
+mkdir -p "${FD_ATOMIC_HOME}/.local/bin" "$FD_ARCHIVE_ROOT"
+printf '#!/usr/bin/env bash\necho "fd 9.9.9"\n' > "$FD_ARCHIVE_ROOT/fd"
+chmod +x "$FD_ARCHIVE_ROOT/fd"
+tar -czf "${WORK}/good-fd.tar.gz" -C "${WORK}/fd-archive" \
+    fd-v9.9.9-x86_64-unknown-linux-musl
+assert_exit 0 "fd is extracted from its nested release directory" \
+    env HOME="$FD_ATOMIC_HOME" FIXTURE="${WORK}/good-fd.tar.gz" bash --norc -c '
+        source "$1/setup.sh"
+        fetch_verified() { cp "$FIXTURE" "$4"; }
+        install_verified_binary fd 9.9.9 linux_x86_64
+    ' _ "$REPO_DIR"
+assert_eq "fd 9.9.9" "$("${FD_ATOMIC_HOME}/.local/bin/fd" --version)" \
+    "the nested fd binary is activated at ~/.local/bin/fd"
 
 # Purge follows TOOL records, not filenames.  fzf and ble.sh deliberately look
 # managed but are absent from the fixture manifest and must survive.
@@ -506,10 +597,10 @@ grep -v '^FZF_SHA256_linux_x86_64=' "${REPO_DIR}/tools.lock" > "${WORK}/incomple
 assert_exit 1 "lock validation rejects a missing platform hash" \
     bash -c "source '${REPO_DIR}/lib/tools.sh'; bc_tools_load '${WORK}/incomplete.lock'; bc_tools_validate"
 
-assert_eq "4" "$(grep -cE '^[A-Z]+_VERSION=' "${REPO_DIR}/tools.lock")" \
+assert_eq "5" "$(grep -cE '^[A-Z]+_VERSION=' "${REPO_DIR}/tools.lock")" \
     "the lock has one version for every managed tool"
-assert_eq "7" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${REPO_DIR}/tools.lock")" \
-    "the lock has six Linux binary hashes plus the architecture-independent ble.sh hash"
+assert_eq "9" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${REPO_DIR}/tools.lock")" \
+    "the lock has eight Linux binary hashes plus the architecture-independent ble.sh hash"
 
 for tool in "${BC_MANAGED_TOOLS[@]}"; do
     version="$(bc_tool_version "$tool")"
@@ -540,6 +631,8 @@ assert_eq "linux_aarch64" "$(PATH="${WORK}/fake-uname:${PATH}" bc_tool_platform)
     "Linux arm64 is normalised to the lock's platform name"
 assert_eq "aarch64-unknown-linux-musl" "$(_bc_tool_triple zoxide linux_aarch64)" \
     "the zoxide asset triple matches Linux ARM64"
+assert_eq "x86_64-unknown-linux-musl" "$(_bc_tool_triple fd linux_x86_64)" \
+    "the fd asset triple matches Linux x86_64"
 
 mkdir -p "${WORK}/fake-darwin" "${WORK}/fake-i686"
 printf '%s\n' '#!/usr/bin/env bash' \
@@ -635,9 +728,9 @@ assert_exit 0 "a named lock refresh preserves a complete, valid lock" \
     bash -c "source '${LOCK_REPO}/lib/tools.sh'; bc_tools_validate"
 assert_file_contains "${LOCK_REPO}/tools.lock" "FZF_VERSION=99.0.0" \
     "a named update advances the selected tool"
-assert_eq "4" "$(grep -cE '^[A-Z]+_VERSION=' "${LOCK_REPO}/tools.lock")" \
+assert_eq "5" "$(grep -cE '^[A-Z]+_VERSION=' "${LOCK_REPO}/tools.lock")" \
     "a named lock refresh does not drop unselected tool versions"
-assert_eq "7" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${LOCK_REPO}/tools.lock")" \
+assert_eq "9" "$(grep -cE '^[A-Z]+_SHA256(_[a-z0-9_]+)?=' "${LOCK_REPO}/tools.lock")" \
     "a named lock refresh does not drop unselected platform hashes"
 
 printf '%s\n' '#!/usr/bin/env bash' \

@@ -58,6 +58,12 @@ The HEAD block is inserted immediately after your non-interactive guard (or prep
 
 The install manifest (`~/.local/share/bash-customizations/manifest`) is a **generated runtime artifact** — it is written by `setup.sh`, never committed to git. It records the repo path, the backup directory used, every symlink created, and the version and installed-file hash of each tool the project owns. `uninstall.sh` and `doctor.sh` read it; if it is absent they fall back to a hardcoded default symlink list but claim ownership of no tools. A plain uninstall leaves the tools installed and retains a minimal ownership-only manifest, so a later reinstall or `--purge-tools` still recognises them. Previous manifests are kept as `manifest.<timestamp>.bak` (last 5 retained).
 
+Setup also writes `~/.cache/bash-customizations/capabilities.sh`. It caches the
+availability of startup-time tools so WSL does not search every imported
+Windows `PATH` directory whenever a terminal opens. Re-run
+`bash setup.sh --skip-tools` after manually installing or removing an optional
+companion such as `eza` or Docker; uninstall removes the generated cache.
+
 ---
 
 ## Tools
@@ -67,6 +73,7 @@ The install manifest (`~/.local/share/bash-customizations/manifest`) is a **gene
 | [starship](https://starship.rs) | pinned release asset | Cross-shell prompt with git, language, and time info |
 | [ble.sh](https://github.com/akinomyoga/ble.sh) | pinned dated nightly | Syntax highlighting, smart completion, auto-suggestions |
 | [bash-completion](https://github.com/scop/bash-completion) | system package manager | Tab-completion ecosystem for hundreds of CLI tools |
+| [fd](https://github.com/sharkdp/fd) | pinned release asset | Fast filesystem traversal for fzf and `fcd` |
 | [fzf](https://github.com/junegunn/fzf) | pinned release asset | Fuzzy file finder — CTRL-T, CTRL-R, ALT-C |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | pinned release asset | Frecency-ranked directory jumper (`z`, `zi`) |
 
@@ -204,7 +211,7 @@ You can also invoke the scripts directly if you prefer:
 | `--restore` | Uninstall, then restore a backup |
 | `--restore=TIMESTAMP` | Restore a specific backup (see `--list-backups`) |
 | `--restore-only[=TS]` | Restore a backup *without* uninstalling |
-| `--purge-tools` | Also remove manifest-owned tools (starship, fzf, zoxide, ble.sh) |
+| `--purge-tools` | Also remove manifest-owned tools (starship, fd, fzf, zoxide, ble.sh) |
 | `--list-backups` | List available backups and exit |
 | `--prune-backups[=N]` | Delete all but the newest N backups (default 5) and exit |
 | `--delete-backup=TS` | Delete one backup and exit |
@@ -287,7 +294,7 @@ predates the install — are advisory and never change the exit code, so
 | 1 | Platform is Linux x86_64 or aarch64 |
 | 2 | Bash version ≥ 4.2 |
 | 3 | `~/.local/bin` on PATH |
-| 4 | `starship`, `fzf`, `zoxide` binaries exist and are functional |
+| 4 | `starship`, `fd`, `fzf`, `zoxide` binaries exist and are functional |
 | 5 | ble.sh installed + `.blerc` has fzf integration |
 | 6 | `bash-completion` available |
 | 7 | Manifest exists, is readable, and `REPO=` matches the current repo location |
@@ -442,6 +449,8 @@ ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 - **EDITOR / VISUAL** — defaults to `nano`; change at the top of `exports.sh` if preferred
 - **PATH** — prepends `~/.local/bin`, `~/bin`, `~/.cargo/bin` (only if they exist)
 - **XDG** — sets `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`
+- **Capability cache** — uses setup-time results for `fd`, `rg`, `eza`, Docker,
+  fzf, zoxide and Starship; falls back to live detection if the cache is absent
 - **MANPAGER / MANROFFOPT** — coloured man pages via `less --use-color` (bold=red, underline=blue)
 - **FZF** — `FZF_DEFAULT_COMMAND` (uses `fd` or `rg` when available), `FZF_DEFAULT_OPTS`
   with Catppuccin Mocha colours, per-binding preview options
@@ -449,8 +458,8 @@ ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 - **Starship** — `STARSHIP_CONFIG` pointing to `~/.config/starship.toml`
 
 ### `history.sh`
-- `HISTSIZE=100000` / `HISTFILESIZE=200000`
-- `HISTCONTROL=ignoredups:erasedups` — no duplicates, ever
+- `HISTSIZE=50000` / `HISTFILESIZE=100000`
+- `HISTCONTROL=ignoreboth` — skips adjacent duplicates and space-prefixed commands without scanning the full history
 - `HISTTIMEFORMAT` — timestamps on every entry
 - `shopt -s histappend cmdhist histreedit`
 - `PROMPT_COMMAND` — `history -a; history -n` after every command

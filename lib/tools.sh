@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lib/tools.sh
 #
-# Everything the scripts know about the four tools setup.sh installs: which
+# Everything the scripts know about the five tools setup.sh installs: which
 # versions are pinned, what to download for a given platform, and how to check
 # that what arrived is what was expected.
 #
@@ -24,7 +24,7 @@ BC_TOOLS_LOCK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools.lock"
 # ── The lock file ─────────────────────────────────────────────────────────────
 
 declare -gA BC_TOOLS=()
-BC_MANAGED_TOOLS=(starship fzf zoxide blesh)
+BC_MANAGED_TOOLS=(starship fd fzf zoxide blesh)
 
 # bc_tools_load [FILE] — read tools.lock into BC_TOOLS.  Returns 1 if unreadable.
 #
@@ -117,14 +117,16 @@ bc_tools_validate() {
 
 # _bc_tool_triple TOOL PLATFORM — the vendor's name for that platform.
 #
-# Three projects, three naming schemes, none of them uname's.  starship and
-# zoxide both use Rust target triples (and both publish musl builds for Linux,
-# which is what we want — a glibc build breaks on Alpine and on older distros).
-# fzf is Go and uses GOOS_GOARCH.
+# Four projects, three naming schemes, none of them uname's.  starship, fd and
+# zoxide use Rust target triples (and publish musl builds for Linux, which is
+# what we want — a glibc build breaks on Alpine and on older distros). fzf is Go
+# and uses GOOS_GOARCH.
 _bc_tool_triple() {
     case "$1:$2" in
-        starship:linux_x86_64|zoxide:linux_x86_64)   echo x86_64-unknown-linux-musl  ;;
-        starship:linux_aarch64|zoxide:linux_aarch64) echo aarch64-unknown-linux-musl ;;
+        starship:linux_x86_64|fd:linux_x86_64|zoxide:linux_x86_64)
+            echo x86_64-unknown-linux-musl ;;
+        starship:linux_aarch64|fd:linux_aarch64|zoxide:linux_aarch64)
+            echo aarch64-unknown-linux-musl ;;
         fzf:linux_x86_64)  echo linux_amd64 ;;
         fzf:linux_aarch64) echo linux_arm64 ;;
         *) return 1 ;;
@@ -150,6 +152,11 @@ bc_tool_url() {
         fzf)
             triple="$(_bc_tool_triple fzf "$platform")" || return 1
             printf 'https://github.com/junegunn/fzf/releases/download/v%s/fzf-%s-%s.tar.gz\n' \
+                   "$version" "$version" "$triple"
+            ;;
+        fd)
+            triple="$(_bc_tool_triple fd "$platform")" || return 1
+            printf 'https://github.com/sharkdp/fd/releases/download/v%s/fd-v%s-%s.tar.gz\n' \
                    "$version" "$version" "$triple"
             ;;
         zoxide)

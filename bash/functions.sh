@@ -5,6 +5,9 @@
 # Keep each function focused and documented.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Standalone-module fallback; exports.sh normally provides the cached version.
+declare -F _bc_has &>/dev/null || _bc_has() { command -v "$1" &>/dev/null; }
+
 # ── Navigation ────────────────────────────────────────────────────────────────
 
 # mkcd <dir> — make a directory and cd into it in one step.
@@ -151,17 +154,28 @@ grep-in() {
 
 # fcd [dir] — [fzf] fuzzy cd: interactively pick a directory with fzf.
 fcd() {
-    if ! command -v fzf &>/dev/null; then
+    if ! _bc_has fzf; then
         echo "fcd: fzf is not installed" >&2; return 1
     fi
     local dir fzf_exit
-    dir=$(
-        find "${1:-.}" -type d \
-             -not -path '*/\.git/*' \
-             -not -path '*/node_modules/*' \
-             2>/dev/null \
-        | fzf +m --preview="ls -la {}"
-    ); fzf_exit=$?
+    if _bc_has fd; then
+        # fd honours ignore files and prunes exclusions while walking, rather
+        # than discovering every entry below those directories and filtering
+        # the output afterwards.
+        dir=$(fd --type d --hidden \
+                 --exclude .git --exclude node_modules \
+                 . "${1:-.}" 2>/dev/null \
+              | fzf +m --preview="ls -la {}")
+        fzf_exit=$?
+    else
+        # Portable fallback. -prune is essential: `-not -path` hides matches
+        # but still traverses the enormous .git and node_modules trees.
+        dir=$(find "${1:-.}" \
+                 \( -name .git -o -name node_modules \) -prune \
+                 -o -type d -print 2>/dev/null \
+              | fzf +m --preview="ls -la {}")
+        fzf_exit=$?
+    fi
     # fzf exits 130 when the user cancels (Esc / Ctrl-C) — that is not an error.
     [[ $fzf_exit -eq 130 ]] && return 0
     [[ $fzf_exit -ne 0 ]]   && return 1

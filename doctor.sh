@@ -8,7 +8,7 @@
 #   1.  Platform (Linux x86_64 or aarch64)
 #   2.  Bash version (≥ 4.2 required)
 #   3.  PATH contains ~/.local/bin
-#   4.  Tool binaries: starship, fzf, zoxide
+#   4.  Tool binaries: starship, fd, fzf, zoxide
 #   5.  ble.sh installation
 #   6.  bash-completion availability
 #   7.  Manifest exists, is readable, and records the installed version
@@ -23,7 +23,7 @@
 #  11.  starship.toml: exists at the expected location
 #  12.  History file: exists and is writable
 #  13.  ble.sh + fzf conflict detection
-#  14.  Optional companion tools (advisory — tree, eza, docker, fzf, curl, …)
+#  14.  Optional companion tools (advisory — tree, eza, docker, curl, …)
 #
 # Exit codes:
 #   0  — no failures (warnings may still be present; they are advisory)
@@ -42,8 +42,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
 XDG_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
 LOCAL_BIN="${HOME}/.local/bin"
 MANIFEST_FILE="${HOME}/.local/share/bash-customizations/manifest"
+CAPABILITY_CACHE_FILE="${XDG_CACHE_HOME}/bash-customizations/capabilities.sh"
 
 # Block markers (must match setup.sh).  The END markers are part of the
 # contract with setup.sh/uninstall.sh and are kept here for that reason, even
@@ -135,7 +137,7 @@ parse_args() {
                 echo "   1  Platform is Linux x86_64 or aarch64"
                 echo "   2  Bash version ≥ 4.2"
                 echo "   3  ~/.local/bin on PATH"
-                echo "   4  starship / fzf / zoxide binaries present and functional"
+                echo "   4  starship / fd / fzf / zoxide binaries present and functional"
                 echo "   5  ble.sh installed"
                 echo "   6  bash-completion available"
                 echo "   7  Install manifest exists, matches this repo and records its version"
@@ -215,7 +217,7 @@ check_path() {
     # Check whether ~/.local/bin actually has our binaries.  A missing one used
     # to produce neither a pass nor a fail — the check went silent exactly when
     # it mattered.  -e is false for a dangling symlink, so test -L as well.
-    for bin in starship fzf zoxide; do
+    for bin in starship fd fzf zoxide; do
         if [[ -e "${LOCAL_BIN}/${bin}" ]]; then
             pass "${LOCAL_BIN}/${bin} exists"
         elif [[ -L "${LOCAL_BIN}/${bin}" ]]; then
@@ -257,6 +259,13 @@ check_tools() {
     else
         _tool_missing starship \
              "bash setup.sh  (or: curl -sS https://starship.rs/install.sh | sh)"
+    fi
+
+    # fd
+    if command -v fd &>/dev/null; then
+        pass "fd: $(fd --version 2>/dev/null | head -1)"
+    else
+        _tool_missing fd "bash setup.sh"
     fi
 
     # fzf
@@ -380,12 +389,20 @@ check_manifest() {
     # shellcheck disable=SC2126  # deliberate, see above
     link_count="$(grep '^LINK=' "$MANIFEST_FILE" 2>/dev/null | wc -l | tr -d ' ')"
     info "${link_count} symlink(s) recorded in manifest"
-    tool_count="$(grep -E '^TOOL=(starship|fzf|zoxide|blesh):[^:]+:[0-9a-f]{64}$' \
+    tool_count="$(grep -E '^TOOL=(starship|fd|fzf|zoxide|blesh):[^:]+:[0-9a-f]{64}$' \
         "$MANIFEST_FILE" 2>/dev/null | wc -l | tr -d ' ')"
     if [[ "$tool_count" -gt 0 ]]; then
         info "${tool_count} project-owned tool installation(s) recorded in manifest"
     else
         info "No project-owned tools recorded; --purge-tools will leave binaries alone"
+    fi
+
+    if [[ -r "$CAPABILITY_CACHE_FILE" ]] \
+        && grep -qF 'BC_CAP_CACHE_VERSION=1' "$CAPABILITY_CACHE_FILE"; then
+        pass "Runtime capability cache exists"
+    else
+        warn "Runtime capability cache is missing or outdated" \
+             "Run: bash setup.sh --skip-tools"
     fi
 
     local repo_in_manifest

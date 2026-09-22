@@ -17,6 +17,9 @@
 # (see `ls` below), annotate one definition only.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Standalone-module fallback; exports.sh normally provides the cached version.
+declare -F _bc_has &>/dev/null || _bc_has() { command -v "$1" &>/dev/null; }
+
 # ── Safety rails ──────────────────────────────────────────────────────────────
 # Prompt before overwriting/deleting files.
 alias cp='cp -iv'        #: copy, asking first and saying what it did
@@ -32,7 +35,7 @@ alias mkdir='mkdir -pv'  #: make a directory, parents included
 # shellcheck disable=SC2262,SC2263  # this file is SOURCED into an interactive
 # shell, not run as a script, so the aliases defined here do take effect for the
 # user's later commands; shellcheck's same-parsing-unit rule does not apply.
-if command -v eza &>/dev/null; then
+if _bc_has eza; then
     alias ls='eza --group-directories-first --icons=auto --color=auto'   #: list files, directories first
     alias ll='eza -lah --group-directories-first --icons=auto --git'     #: long listing with sizes, dates and git state
     alias la='eza -a   --group-directories-first --icons=auto'           #: list everything, dotfiles included
@@ -105,7 +108,7 @@ alias gst='git stash'                                    #: stash your uncommitt
 alias gstp='git stash pop'                               #: reapply the most recent stash
 
 # ── Docker ────────────────────────────────────────────────────────────────────
-if command -v docker &>/dev/null; then
+if _bc_has docker; then
     alias dk='docker'                    #: [docker] docker
     alias dkps='docker ps'               #: [docker] running containers
     alias dkpsa='docker ps -a'           #: [docker] every container, stopped ones included

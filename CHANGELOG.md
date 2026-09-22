@@ -10,6 +10,19 @@ flag was renamed or removed, so your muscle memory needs updating.
 
 ## [Unreleased]
 
+### Added
+
+- `fd` is now a pinned, checksum-verified managed tool used by fzf and `fcd`.
+- Setup generates a runtime capability cache so missing optional commands do
+  not trigger repeated full-`PATH` searches when shells start.
+
+### Changed
+
+- `fcd` prefers `fd` and its portable `find` fallback now prunes `.git` and
+  `node_modules` instead of traversing and filtering them afterwards.
+- History is bounded at 50,000 in-memory and 100,000 on-disk entries and uses
+  `ignoreboth` instead of the full-history scan performed by `erasedups`.
+
 ## [1.2.0] - 2026-09-22
 
 ### Removed

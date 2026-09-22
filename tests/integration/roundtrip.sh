@@ -88,11 +88,13 @@ assert_file_contains "$HOME/.bashrc" "# === BEGIN bash-customizations-attach ===
 assert_file_contains "$HOME/.bashrc" "$ORIGINAL_BASHRC_MARKER" "the user's own .bashrc content is preserved"
 
 manifest="$HOME/.local/share/bash-customizations/manifest"
-assert_eq "4" "$(grep -c '^TOOL=' "$manifest")" \
-    "the manifest records ownership of all four installed tools"
-for tool in starship fzf zoxide blesh; do
+assert_eq "5" "$(grep -c '^TOOL=' "$manifest")" \
+    "the manifest records ownership of all five installed tools"
+for tool in starship fd fzf zoxide blesh; do
     assert_file_contains "$manifest" "TOOL=${tool}:" "the manifest owns ${tool}"
 done
+assert_exists "$HOME/.cache/bash-customizations/capabilities.sh" \
+    "the runtime capability cache is generated"
 
 mode="$(stat -c '%a' "$HOME/.bashrc")"
 assert_eq "644" "$mode" ".bashrc keeps its original permissions"
@@ -122,7 +124,7 @@ assert_eq "1" "$(count_blocks '# === BEGIN bash-customizations-attach ===')" \
     "exactly one TAIL block after re-running"
 assert_eq "$backups_before" "$(backup_count)" \
     "re-running creates no redundant backup"
-assert_eq "4" "$(grep -c '^TOOL=' "$manifest")" \
+assert_eq "5" "$(grep -c '^TOOL=' "$manifest")" \
     "a dotfile-only re-run preserves tool ownership"
 
 # The manifest's BACKUP= is what --restore resolves to by default, so a re-run
@@ -239,6 +241,8 @@ assert_not_contains "$(cat "$HOME/.bashrc")" "bash-customizations" \
     "no managed blocks survive the restore"
 assert_absent "$HOME/.bash/aliases.sh" "module symlinks are gone"
 assert_absent "$HOME/.config/starship.toml" "starship.toml symlink is gone"
+assert_absent "$HOME/.cache/bash-customizations/capabilities.sh" \
+    "the generated runtime cache is removed"
 
 assert_exit 1 "doctor.sh now reports the setup as absent" bash "${REPO_DIR}/doctor.sh"
 
@@ -260,7 +264,7 @@ assert_absent "$HOME/.bash/exports.sh" "module symlinks removed"
 assert_exists "$HOME/.local/share/bash-customizations/manifest" "tool ownership manifest retained"
 assert_eq "0" "$(grep -c '^LINK=' "$HOME/.local/share/bash-customizations/manifest" || true)" \
     "retained manifest claims no removed symlinks"
-assert_eq "4" "$(grep -c '^TOOL=' "$HOME/.local/share/bash-customizations/manifest" || true)" \
+assert_eq "5" "$(grep -c '^TOOL=' "$HOME/.local/share/bash-customizations/manifest" || true)" \
     "retained manifest keeps all managed tool ownership records"
 assert_file_contains "$HOME/.bashrc" "$ORIGINAL_BASHRC_MARKER" \
     "the user's own .bashrc content survives a plain uninstall"

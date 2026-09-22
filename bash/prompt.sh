@@ -11,7 +11,10 @@
 # Config file    : ~/.config/starship.toml  (see starship.toml in this repo)
 # ─────────────────────────────────────────────────────────────────────────────
 
-if command -v starship &>/dev/null; then
+# Standalone-module fallback; exports.sh normally provides the cached version.
+declare -F _bc_has &>/dev/null || _bc_has() { command -v "$1" &>/dev/null; }
+
+if _bc_has starship; then
     eval "$(starship init bash)"
 else
     # Minimal fallback prompt — no git status, language info, or timestamps.

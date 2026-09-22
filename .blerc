@@ -11,13 +11,17 @@
 #   - ble.sh-specific key bindings (ble/function:blerc)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Standalone fallback for manually sourced .blerc files. exports.sh normally
+# provides the cached version before ble.sh attaches.
+declare -F _bc_has &>/dev/null || _bc_has() { command -v "$1" &>/dev/null; }
+
 # ── fzf integration ───────────────────────────────────────────────────────────
 # These replace fzf's native CTRL-T / CTRL-R / ALT-C bindings and eliminate
 # keymap conflicts between fzf and ble.sh.
 #
 # Requires fzf to be installed and on PATH.
 # The modules ship with ble.sh — no extra install step needed.
-if command -v fzf &>/dev/null; then
+if _bc_has fzf; then
     ble-import -d integration/fzf-completion    # TAB completion via fzf
     ble-import -d integration/fzf-key-bindings  # CTRL-T, CTRL-R, ALT-C
 fi
